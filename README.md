@@ -39,7 +39,24 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
 В Telegram: `/start` → язык → `/connect` → **Demo**. Придут 5 тестовых карточек: негативный отзыв, отзыв без текста, вопросы на кыргызском и русском, отзыв на узбекском. Режим Demo подходит и для записи видео для краудфандинга.
 
-## Продакшн на сервере в РФ
+## Установка на сервер одной командой (рекомендуется)
+
+1. Арендуйте VPS в РФ: Ubuntu 24.04 (или 22.04), 1 vCPU, 1 ГБ RAM — этого достаточно.
+2. Подключитесь к нему. На Windows: PowerShell → `ssh root@IP_СЕРВЕРА`, пароль пришлёт хостер.
+3. Вставьте команды:
+   ```bash
+   apt-get update && apt-get install -y git
+   git clone -b claude/busy-fermat-c2av78 https://github.com/maksik2669-afk404/EMPIRE.git
+   cd EMPIRE && sudo bash deploy/install.sh
+   ```
+   Если репозиторий приватный, git спросит Username (ваш логин GitHub) и Password. В Password вставьте GitHub-токен: Settings → Developer settings → Fine-grained tokens → доступ Contents: Read-only к этому репозиторию.
+4. Скрипт попросит вставить: токен бота, ключ YandexGPT и ID каталога (можно пропустить — будет демо-режим), ваш Telegram ID. Он сам проверит токен и ключ, сгенерирует ключ шифрования и запустит бота как службу с автозапуском.
+
+Обновление: `cd EMPIRE && git pull && sudo bash deploy/install.sh` (ключи и база сохраняются). Лог: `journalctl -u empire-bot -f`.
+
+Скрипт работает без Docker: Docker Hub из РФ доступен нестабильно, а PyPI — да.
+
+## Альтернатива: Docker
 
 ```bash
 git clone <repo> && cd EMPIRE
