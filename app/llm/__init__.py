@@ -76,14 +76,22 @@ class MockLLM:
         if "seller_text" in data:
             text = data["seller_text"]
             return json.dumps({"reply": f"{text}", "reply_translation": text}, ensure_ascii=False)
+        if "product_info" in data:
+            return json.dumps({"title": "Термокружка из нержавеющей стали 450 мл",
+                               "description": "Описание: " + data["product_info"],
+                               "keywords": ["термокружка", "кружка для кофе"],
+                               "attributes": [{"name": "Объём", "value": "450 мл"}],
+                               "seller_summary": "summary", "missing": ["вес"]}, ensure_ascii=False)
         rating = data.get("rating")
         reply = ("Спасибо за отзыв! Нам очень жаль, что так вышло — передали информацию на склад."
                  if rating and rating <= 3 else "Спасибо за ваш отзыв и выбор нашего магазина!")
+        needs_input = False
         if data.get("kind") == "question":
-            reply = "Здравствуйте! Уточним информацию и ответим вам."
+            facts = data.get("product_facts") or ""
+            reply = f"Здравствуйте! {facts}" if facts else "Здравствуйте! Уточним информацию и ответим вам."
+            needs_input = not facts
         return json.dumps({"buyer_lang": "ru", "translation": data.get("text", ""), "reply": reply,
-                           "reply_translation": reply, "needs_input": data.get("kind") == "question"},
-                          ensure_ascii=False)
+                           "reply_translation": reply, "needs_input": needs_input}, ensure_ascii=False)
 
 
 def make_llm(settings) -> LLM:

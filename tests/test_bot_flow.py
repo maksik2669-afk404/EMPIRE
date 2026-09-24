@@ -105,3 +105,29 @@ async def test_full_flow():
     await dp.feed_update(bot, msg("/settings", 13))
     await dp.feed_update(bot, cb("set:auto:5", 14))
     assert db.get_user(42).auto_min_rating == 5
+    await dp.feed_update(bot, cb("set:autoq", 15))
+    assert db.get_user(42).auto_questions == 1
+
+    # a question card that needs facts has the "add facts" button; facts rewrite the answer
+    question = next(i for i in range(1, 6) if db.get_item(i).kind == "question" and db.get_item(i).needs_input)
+    q_card = next(m for m in session.sent if isinstance(m, SendMessage) and f"it:facts:{question}" in str(m.reply_markup))
+    assert q_card.reply_markup.inline_keyboard[0][0].callback_data == f"it:facts:{question}"
+    await dp.feed_update(bot, cb(f"it:facts:{question}", 16))
+    await dp.feed_update(bot, msg("Нельзя мыть в посудомойке", 17))
+    assert db.get_item(question).needs_input == 0 and "посудомойке" in db.get_item(question).draft
+
+    # /facts: add and delete by text
+    await dp.feed_update(bot, msg("/facts", 18))
+    await dp.feed_update(bot, msg("ABC-1\nХлопок 100%", 19))
+    await dp.feed_update(bot, msg("ABC-1 -", 20))
+    assert "ABC-1" not in dict(db.list_facts(42))
+
+    # /card: two messages (title+description, keywords...) and "save as facts"
+    await dp.feed_update(bot, msg("/card", 21))
+    await dp.feed_update(bot, msg("Steel thermo mug 450 ml, keeps hot 6h", 22))
+    edited = [m for m in session.sent if type(m).__name__ == "EditMessageText"][-1]
+    assert "Термокружка" in edited.text and "/60" in edited.text
+    assert "cardfacts" in str(session.sent[-1].reply_markup)
+    await dp.feed_update(bot, cb("cardfacts", 23))
+    await dp.feed_update(bot, msg("100777", 24))
+    assert "100777" in dict(db.list_facts(42))

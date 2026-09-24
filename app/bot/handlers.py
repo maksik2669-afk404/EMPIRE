@@ -12,10 +12,11 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton as Btn, InlineKeyboardMarkup as Kb, Message
 
-from ..ai import DraftError
+from ..ai import TITLE_LIMIT, Card, DraftError
 from ..config import Settings
 from ..crypto import Vault
 from ..db import DB, Account, Item
+from ..facts import parse_csv, parse_text
 from ..marketplaces import TITLES, AuthError, MarketplaceError, make_client, parse_credentials
 from ..service import Engine, QuotaError
 from .texts import SELLER_LANGS, t
@@ -36,6 +37,16 @@ class Edit(StatesGroup):
 
 class Signature(StatesGroup):
     text = State()
+
+
+class Facts(StatesGroup):
+    input = State()
+    for_item = State()
+
+
+class CardFlow(StatesGroup):
+    info = State()
+    sku = State()
 
 
 def esc(s: object) -> str:
@@ -76,6 +87,8 @@ def render_card(item: Item, acc: Account, lang: str) -> tuple[str, Kb | None]:
         [Btn(text=t(lang, "btn_regen"), callback_data=f"it:regen:{item.id}"),
          Btn(text=t(lang, "btn_skip"), callback_data=f"it:skip:{item.id}")],
     ])
+    if item.needs_input:
+        kb.inline_keyboard.insert(0, [Btn(text=t(lang, "btn_facts"), callback_data=f"it:facts:{item.id}")])
     return "\n".join(lines), kb
 
 
@@ -245,11 +258,13 @@ def settings_view(db: DB, tg_id: int) -> tuple[str, Kb]:
     u = db.get_user(tg_id)
     auto = t(u.lang, "auto_off") if not u.auto_min_rating else t(u.lang, "auto_n", n=u.auto_min_rating)
     text = t(u.lang, "settings", lang=SELLER_LANGS.get(u.lang, u.lang), signature=esc(u.signature or "—"),
-             auto=auto, used=u.used, limit=u.monthly_limit)
+             auto=auto, used=u.used, limit=u.monthly_limit,
+             autoq=t(u.lang, "autoq_on" if u.auto_questions else "autoq_off"))
     kb = Kb(inline_keyboard=[
         [Btn(text=t(u.lang, "btn_auto_off"), callback_data="set:auto:0"),
          Btn(text=t(u.lang, "btn_auto_5"), callback_data="set:auto:5"),
          Btn(text=t(u.lang, "btn_auto_4"), callback_data="set:auto:4")],
+        [Btn(text=t(u.lang, "btn_autoq"), callback_data="set:autoq")],
         [Btn(text=t(u.lang, "btn_signature"), callback_data="set:sig"),
          Btn(text=t(u.lang, "btn_lang"), callback_data="set:lang")],
     ])
@@ -268,8 +283,11 @@ async def cb_settings(c: CallbackQuery, state: FSMContext, db: DB, settings: Set
     user = user_of(db, settings, c.from_user.id)
     parts = c.data.split(":")
     await c.answer()
-    if parts[1] == "auto" and parts[2] in ("0", "4", "5"):
-        db.update_user(c.from_user.id, auto_min_rating=int(parts[2]))
+    if parts[1] in ("auto", "autoq"):
+        if parts[1] == "autoq":
+            db.update_user(c.from_user.id, auto_questions=0 if user.auto_questions else 1)
+        elif parts[2] in ("0", "4", "5"):
+            db.update_user(c.from_user.id, auto_min_rating=int(parts[2]))
         text, kb = settings_view(db, c.from_user.id)
         try:
             await c.message.edit_text(text, reply_markup=kb)
@@ -316,6 +334,13 @@ async def cb_item(c: CallbackQuery, state: FSMContext, db: DB, settings: Setting
             await c.answer()
             await c.message.answer(t(lang, "ask_edit"))
             return
+        elif action == "facts":
+            await state.set_state(Facts.for_item)
+            await state.update_data(item_id=item_id)
+            await c.answer()
+            item = db.get_item(item_id)
+            await c.message.answer(t(lang, "ask_item_facts", product=esc(item.product or "—"), sku=esc(item.sku or "*")))
+            return
         else:
             await c.answer()
             return
@@ -351,6 +376,147 @@ async def on_edit(m: Message, state: FSMContext, db: DB, settings: Settings, eng
         return
     text, kb = render_card(item, db.get_account(item.account_id), lang)
     await m.answer(text, reply_markup=kb)
+
+
+# ---------------------------------------------------------------- product facts
+def facts_overview(db: DB, tg_id: int, lang: str) -> str:
+    rows = db.list_facts(tg_id)
+    skus = ", ".join(esc(f"{s} ({cut(n, 30)})" if n else s) for s, n in rows[:15]) + (" …" if len(rows) > 15 else "")
+    return t(lang, "facts_help", n=len(rows), skus=skus)
+
+
+@router.message(Command("facts"))
+async def cmd_facts(m: Message, state: FSMContext, db: DB, settings: Settings):
+    lang = user_of(db, settings, m.from_user.id).lang
+    await state.set_state(Facts.input)
+    await m.answer(facts_overview(db, m.from_user.id, lang))
+
+
+@router.message(Facts.input, F.text, NOT_COMMAND)
+async def on_facts_text(m: Message, db: DB, settings: Settings):
+    lang = user_of(db, settings, m.from_user.id).lang
+    try:
+        sku, facts = parse_text(m.text)
+    except ValueError:
+        await m.answer(t(lang, "facts_bad"))
+        return
+    if facts:  # the seller stays in this mode to add several products in a row
+        db.set_facts(m.from_user.id, sku, facts)
+        await m.answer(t(lang, "facts_saved", sku=esc(sku)))
+    else:
+        ok = db.delete_facts(m.from_user.id, sku)
+        await m.answer(t(lang, "facts_deleted", sku=esc(sku)) if ok else t(lang, "not_found"))
+
+
+@router.message(F.document)
+async def on_document(m: Message, bot: Bot, db: DB, settings: Settings):
+    """A CSV with product facts is accepted at any time."""
+    lang = user_of(db, settings, m.from_user.id).lang
+    doc = m.document
+    if not (doc.file_name or "").lower().endswith((".csv", ".txt")) or (doc.file_size or 0) > 5_000_000:
+        await m.answer(t(lang, "csv_bad", error="CSV ≤ 5 MB"))
+        return
+    buf = await bot.download(doc)
+    try:
+        rows, bad = parse_csv(buf.read())
+    except ValueError as e:
+        await m.answer(t(lang, "csv_bad", error=esc(e)))
+        return
+    for sku, name, facts in rows:
+        db.set_facts(m.from_user.id, sku, facts, name=name)
+    await m.answer(t(lang, "csv_loaded", n=len(rows), bad=bad))
+
+
+@router.message(Facts.for_item, F.text, NOT_COMMAND)
+async def on_item_facts(m: Message, state: FSMContext, db: DB, settings: Settings, engine: Engine):
+    lang = user_of(db, settings, m.from_user.id).lang
+    item_id = (await state.get_data()).get("item_id")
+    await state.clear()
+    try:
+        item = await engine.add_facts_and_redraft(item_id, m.from_user.id, m.text.strip())
+    except DraftError as e:
+        await m.answer(t(lang, "ai_failed", error=esc(e)))
+        return
+    except QuotaError:
+        await m.answer(t(lang, "quota_exceeded", limit=db.get_user(m.from_user.id).monthly_limit))
+        return
+    except PermissionError:
+        await m.answer(t(lang, "not_found"))
+        return
+    text, kb = render_card(item, db.get_account(item.account_id), lang)
+    await m.answer(text, reply_markup=kb)
+
+
+# ---------------------------------------------------------------- product card localisation
+def render_product_card(card: Card, lang: str) -> tuple[str, str]:
+    """Two messages: (title + description) and (keywords, characteristics, gaps) — each fits Telegram's limit."""
+    warn = " ⚠️" if len(card.title) > TITLE_LIMIT else ""
+    first = (f"<b>{t(lang, 'card_title')}</b> ({len(card.title)}/{TITLE_LIMIT}){warn}\n<code>{esc(card.title)}</code>\n\n"
+             f"<b>{t(lang, 'card_desc')}</b> ({len(card.description)})\n<code>{esc(cut(card.description, 2500))}</code>")
+    lines = []
+    if card.keywords:
+        lines += [f"<b>{t(lang, 'card_kw')}</b>", f"<code>{esc(cut(', '.join(card.keywords), 900))}</code>\n"]
+    if card.attributes:
+        lines += [f"<b>{t(lang, 'card_attrs')}</b>"] + [f"• {esc(cut(n, 40))}: {esc(cut(v, 80))}" for n, v in card.attributes[:15]] + [""]
+    if card.missing:
+        lines += [f"<b>{t(lang, 'card_missing')}</b>"] + [f"• {esc(cut(x, 120))}" for x in card.missing[:8]] + [""]
+    if card.seller_summary:
+        lines.append(f"<i>{esc(cut(card.seller_summary, 500))}</i>\n")
+    lines.append(t(lang, "card_note"))
+    return first, "\n".join(lines)
+
+
+@router.message(Command("card"))
+async def cmd_card(m: Message, state: FSMContext, db: DB, settings: Settings):
+    lang = user_of(db, settings, m.from_user.id).lang
+    await state.clear()
+    await state.set_state(CardFlow.info)
+    await m.answer(t(lang, "card_ask"))
+
+
+@router.message(CardFlow.info, F.text, NOT_COMMAND)
+async def on_card_info(m: Message, state: FSMContext, db: DB, settings: Settings, engine: Engine):
+    lang = user_of(db, settings, m.from_user.id).lang
+    info = m.text.strip()
+    wait = await m.answer(t(lang, "card_wait"))
+    try:
+        card = await engine.make_card(m.from_user.id, info)
+    except DraftError as e:  # stay in this mode: the seller can simply send the description again
+        await wait.edit_text(t(lang, "ai_failed", error=esc(e)))
+        return
+    except QuotaError:
+        await state.clear()
+        await wait.edit_text(t(lang, "quota_exceeded", limit=db.get_user(m.from_user.id).monthly_limit))
+        return
+    await state.set_state(None)  # keeps data for the "save as facts" button
+    await state.update_data(info=info[:4000], title=card.title)
+    first, second = render_product_card(card, lang)
+    await wait.edit_text(first)
+    await m.answer(second, reply_markup=Kb(inline_keyboard=[[Btn(text=t(lang, "btn_save_facts"), callback_data="cardfacts")]]))
+
+
+@router.callback_query(F.data == "cardfacts")
+async def cb_card_facts(c: CallbackQuery, state: FSMContext, db: DB, settings: Settings):
+    lang = user_of(db, settings, c.from_user.id).lang
+    await c.answer()
+    if not (await state.get_data()).get("info"):
+        await c.message.answer(t(lang, "not_found"))
+        return
+    await state.set_state(CardFlow.sku)
+    await c.message.answer(t(lang, "ask_sku"))
+
+
+@router.message(CardFlow.sku, F.text, NOT_COMMAND)
+async def on_card_sku(m: Message, state: FSMContext, db: DB, settings: Settings):
+    lang = user_of(db, settings, m.from_user.id).lang
+    sku = m.text.strip()
+    if not sku or " " in sku or len(sku) > 64:
+        await m.answer(t(lang, "facts_bad"))
+        return
+    data = await state.get_data()
+    await state.clear()
+    db.set_facts(m.from_user.id, sku, data["info"], name=data.get("title", ""))
+    await m.answer(t(lang, "facts_saved", sku=esc(sku)))
 
 
 # ---------------------------------------------------------------- admin

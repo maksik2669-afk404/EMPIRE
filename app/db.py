@@ -17,7 +17,16 @@ CREATE TABLE IF NOT EXISTS users (
     used INTEGER NOT NULL DEFAULT 0,
     month TEXT NOT NULL,
     quota_warned TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    auto_questions INTEGER NOT NULL DEFAULT 0     -- 1 = auto-answer questions when product facts cover them
+);
+CREATE TABLE IF NOT EXISTS facts (
+    tg_id INTEGER NOT NULL,
+    sku TEXT NOT NULL,                  -- nmId / SKU / offerId as the marketplace reports it; '*' = whole shop
+    name TEXT NOT NULL DEFAULT '',
+    facts TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (tg_id, sku)
 );
 CREATE TABLE IF NOT EXISTS accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,6 +80,7 @@ class User:
     month: str
     quota_warned: str
     created_at: str = ""
+    auto_questions: int = 0
 
 
 @dataclass
@@ -118,7 +128,13 @@ class DB:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
         self.conn.executescript(SCHEMA)
+        self._migrate()
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(users)")}
+        if "auto_questions" not in cols:
+            self.conn.execute("ALTER TABLE users ADD COLUMN auto_questions INTEGER NOT NULL DEFAULT 0")
 
     def _exec(self, sql: str, args: tuple = ()) -> sqlite3.Cursor:
         cur = self.conn.execute(sql, args)
@@ -217,6 +233,33 @@ class DB:
             "SELECT a.tg_id FROM items i JOIN accounts a ON a.id=i.account_id WHERE i.id=?", (item_id,)
         ).fetchone()
         return row[0] if row else None
+
+    # ---- product facts
+    def set_facts(self, tg_id: int, sku: str, facts: str, name: str = "") -> None:
+        self._exec(
+            "INSERT INTO facts (tg_id, sku, name, facts, updated_at) VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT (tg_id, sku) DO UPDATE SET facts=excluded.facts, updated_at=excluded.updated_at, "
+            "name=CASE WHEN excluded.name != '' THEN excluded.name ELSE facts.name END",
+            (tg_id, sku, name, facts, now()),
+        )
+
+    def delete_facts(self, tg_id: int, sku: str) -> bool:
+        return self._exec("DELETE FROM facts WHERE tg_id=? AND sku=?", (tg_id, sku)).rowcount == 1
+
+    def list_facts(self, tg_id: int) -> list[tuple[str, str]]:
+        return [(r[0], r[1]) for r in self.conn.execute(
+            "SELECT sku, name FROM facts WHERE tg_id=? ORDER BY updated_at DESC", (tg_id,))]
+
+    def facts_for(self, tg_id: int, sku: str) -> tuple[str, bool]:
+        """(facts text for the prompt, whether product-specific facts exist)."""
+        rows = dict(self.conn.execute(
+            "SELECT sku, facts FROM facts WHERE tg_id=? AND sku IN (?, '*')", (tg_id, sku or "")).fetchall())
+        parts = []
+        if sku and sku in rows and sku != "*":
+            parts.append(f"About this product: {rows[sku]}")
+        if "*" in rows:
+            parts.append(f"About the shop: {rows['*']}")
+        return "\n".join(parts), bool(sku and sku != "*" and sku in rows)
 
     # ---- admin stats (traction numbers for the crowdfunding page)
     def stats(self) -> dict:

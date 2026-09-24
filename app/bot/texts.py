@@ -11,7 +11,9 @@ T: dict[str, dict[str, str]] = {
         "help": ("<b>Ответы покупателям Wildberries, Ozon и Яндекс Маркета на любом языке.</b>\n\n"
                  "Я забираю новые отзывы и вопросы, перевожу их на ваш язык и готовлю ответ на языке покупателя. "
                  "Вы нажимаете «Отправить» — ответ публикуется на маркетплейсе.\n\n"
-                 "/connect — подключить магазин\n/accounts — мои магазины\n/sync — проверить новые сейчас\n"
+                 "/connect — подключить магазин\n/accounts — мои магазины\n"
+                 "/card — карточка товара на русском из описания на любом языке\n"
+                 "/facts — факты о товарах для точных ответов\n/sync — проверить новые сейчас\n"
                  "/settings — автоответы, подпись, язык\n/help — эта справка\n\n"
                  "Попробуйте без ключей: /connect → Demo."),
         "connect_choose": "Какой маркетплейс подключаем?",
@@ -35,7 +37,7 @@ T: dict[str, dict[str, str]] = {
         "btn_remove": "Удалить {mp} #{id}",
         "removed": "Удалено.",
         "settings": ("<b>Настройки</b>\nЯзык: {lang}\nПодпись: {signature}\nАвтоответ: {auto}\n"
-                     "Лимит ИИ-ответов: {used}/{limit} в этом месяце"),
+                     "Автоответ на вопросы: {autoq}\nЛимит ИИ-ответов: {used}/{limit} в этом месяце"),
         "auto_off": "выключен", "auto_n": "на отзывы от {n}★ без вопросов к фактам",
         "btn_auto_off": "Автоответ: выкл", "btn_auto_5": "Авто: только 5★", "btn_auto_4": "Авто: 4–5★",
         "btn_signature": "Подпись", "btn_lang": "Язык",
@@ -57,13 +59,36 @@ T: dict[str, dict[str, str]] = {
         "ai_failed": "❌ ИИ не смог подготовить текст, попробуйте ещё раз: {error}",
         "cancelled": "Отменено.",
         "not_found": "Не найдено.",
+        "btn_facts": "📚 Добавить факты",
+        "ask_item_facts": "Напишите факты о товаре «{product}» ({sku}) на своём языке: материал, размеры, совместимость, уход, комплект. Я запомню их и перепишу ответ, а следующие вопросы по этому товару будут отвечаться сразу.",
+        "facts_help": "<b>Факты о товарах</b>\nИз них бот точно отвечает на вопросы покупателей. Пишите на любом языке.\n\n• Добавить: первая строка — артикул (nmId / SKU / offerId), дальше факты.\n• О магазине в целом (доставка, гарантия, возврат): первая строка <code>*</code>.\n• Удалить: <code>артикул -</code>\n• Много товаров: пришлите CSV-файл с колонками <code>артикул;название;факты</code>.\n\nСохранено: {n}. {skus}",
+        "facts_saved": "✅ Факты сохранены для {sku}.",
+        "facts_deleted": "Удалено: {sku}.",
+        "facts_bad": "Первая строка — артикул, со второй — факты. Или /cancel.",
+        "csv_loaded": "✅ Загружено товаров: {n}. Пропущено строк: {bad}.",
+        "csv_bad": "Не удалось прочитать CSV (нужны колонки артикул;название;факты): {error}",
+        "autoq_on": "включён — если факты о товаре покрывают ответ",
+        "autoq_off": "выключен",
+        "btn_autoq": "Автоответ на вопросы: вкл/выкл",
+        "card_ask": "Опишите товар на любом языке: что это, материалы, размеры, особенности, для кого, комплектация. Чем больше фактов, тем сильнее карточка — я ничего не выдумываю.",
+        "card_wait": "Пишу карточку…",
+        "card_title": "Название",
+        "card_desc": "Описание",
+        "card_kw": "Поисковые запросы",
+        "card_attrs": "Характеристики",
+        "card_missing": "Добавьте, чтобы карточка продавала лучше",
+        "card_note": "Нажмите на текст, чтобы скопировать.",
+        "btn_save_facts": "💾 Сохранить как факты товара",
+        "ask_sku": "Пришлите артикул товара (nmId / SKU / offerId), к которому привязать это описание.",
     },
     "en": {
         "choose_lang": "Choose your language. You will read reviews and write replies in it — the buyer gets the reply in their own language.",
         "help": ("<b>Answer Wildberries, Ozon and Yandex Market buyers in any language.</b>\n\n"
                  "I fetch new reviews and questions, translate them into your language and draft a reply in the buyer's "
                  "language. You tap “Send” and the reply is published on the marketplace.\n\n"
-                 "/connect — connect a shop\n/accounts — my shops\n/sync — check for new items now\n"
+                 "/connect — connect a shop\n/accounts — my shops\n"
+                 "/card — Russian product card from a description in any language\n"
+                 "/facts — product facts for accurate answers\n/sync — check for new items now\n"
                  "/settings — auto-replies, signature, language\n/help — this help\n\n"
                  "Try it without keys: /connect → Demo."),
         "connect_choose": "Which marketplace?",
@@ -86,7 +111,7 @@ T: dict[str, dict[str, str]] = {
         "btn_remove": "Remove {mp} #{id}",
         "removed": "Removed.",
         "settings": ("<b>Settings</b>\nLanguage: {lang}\nSignature: {signature}\nAuto-reply: {auto}\n"
-                     "AI replies this month: {used}/{limit}"),
+                     "Auto-answer questions: {autoq}\nAI replies this month: {used}/{limit}"),
         "auto_off": "off", "auto_n": "reviews with {n}★ or more, when no product facts are needed",
         "btn_auto_off": "Auto-reply: off", "btn_auto_5": "Auto: 5★ only", "btn_auto_4": "Auto: 4–5★",
         "btn_signature": "Signature", "btn_lang": "Language",
@@ -108,13 +133,36 @@ T: dict[str, dict[str, str]] = {
         "ai_failed": "❌ AI could not prepare the text, please try again: {error}",
         "cancelled": "Cancelled.",
         "not_found": "Not found.",
+        "btn_facts": "📚 Add facts",
+        "ask_item_facts": "Write facts about “{product}” ({sku}) in your language: material, size, compatibility, care, what's in the box. I will remember them and rewrite the reply; future questions about this product will be answered right away.",
+        "facts_help": "<b>Product facts</b>\nThe bot uses them to answer buyer questions accurately. Any language.\n\n• Add: first line is the SKU (nmId / SKU / offerId), then the facts.\n• Shop-wide facts (delivery, warranty, returns): first line <code>*</code>.\n• Delete: <code>SKU -</code>\n• Many products: send a CSV file with columns <code>sku;name;facts</code>.\n\nSaved: {n}. {skus}",
+        "facts_saved": "✅ Facts saved for {sku}.",
+        "facts_deleted": "Deleted: {sku}.",
+        "facts_bad": "First line is the SKU, facts from the second line. Or /cancel.",
+        "csv_loaded": "✅ Products loaded: {n}. Rows skipped: {bad}.",
+        "csv_bad": "Could not read the CSV (columns sku;name;facts expected): {error}",
+        "autoq_on": "on — when product facts cover the answer",
+        "autoq_off": "off",
+        "btn_autoq": "Auto-answer questions: on/off",
+        "card_ask": "Describe the product in any language: what it is, materials, size, features, who it is for, what's in the box. More facts make a stronger card — I never make things up.",
+        "card_wait": "Writing the card…",
+        "card_title": "Title",
+        "card_desc": "Description",
+        "card_kw": "Search queries",
+        "card_attrs": "Characteristics",
+        "card_missing": "Add these to sell better",
+        "card_note": "Tap a text to copy it.",
+        "btn_save_facts": "💾 Save as product facts",
+        "ask_sku": "Send the product SKU (nmId / SKU / offerId) to attach this description to.",
     },
     "zh": {
         "choose_lang": "请选择语言。您将用该语言阅读评价和撰写回复，买家会收到其本人语言的回复。",
         "help": ("<b>用任何语言回复 Wildberries、Ozon 和 Yandex Market 的买家。</b>\n\n"
                  "我会获取新的评价和问题，翻译成您的语言，并用买家的语言起草回复。"
                  "您点击“发送”，回复即发布到平台。\n\n"
-                 "/connect — 连接店铺\n/accounts — 我的店铺\n/sync — 立即检查新消息\n"
+                 "/connect — 连接店铺\n/accounts — 我的店铺\n"
+                 "/card — 用任何语言的描述生成俄语商品卡\n"
+                 "/facts — 商品信息，用于准确回答\n/sync — 立即检查新消息\n"
                  "/settings — 自动回复、签名、语言\n/help — 帮助\n\n"
                  "无需密钥即可试用：/connect → Demo。"),
         "connect_choose": "要连接哪个平台？",
@@ -135,7 +183,7 @@ T: dict[str, dict[str, str]] = {
         "acc_ok": "运行中", "acc_off": "⛔ 已停用：{error}",
         "btn_remove": "删除 {mp} #{id}",
         "removed": "已删除。",
-        "settings": ("<b>设置</b>\n语言：{lang}\n签名：{signature}\n自动回复：{auto}\n本月 AI 回复：{used}/{limit}"),
+        "settings": ("<b>设置</b>\n语言：{lang}\n签名：{signature}\n自动回复：{auto}\n自动回答问题：{autoq}\n本月 AI 回复：{used}/{limit}"),
         "auto_off": "关闭", "auto_n": "{n}★ 及以上且无需商品信息的评价",
         "btn_auto_off": "自动回复：关", "btn_auto_5": "自动：仅 5★", "btn_auto_4": "自动：4–5★",
         "btn_signature": "签名", "btn_lang": "语言",
@@ -157,6 +205,27 @@ T: dict[str, dict[str, str]] = {
         "ai_failed": "❌ AI 未能生成文本，请重试：{error}",
         "cancelled": "已取消。",
         "not_found": "未找到。",
+        "btn_facts": "📚 添加商品信息",
+        "ask_item_facts": "请用您的语言填写商品“{product}”（{sku}）的信息：材质、尺寸、兼容性、保养、包装清单。我会记住并重写回复，以后关于该商品的问题将立即回答。",
+        "facts_help": "<b>商品信息</b>\n机器人据此准确回答买家问题。可使用任何语言。\n\n• 添加：第一行为货号（nmId / SKU / offerId），之后为商品信息。\n• 店铺通用信息（配送、保修、退货）：第一行写 <code>*</code>。\n• 删除：<code>货号 -</code>\n• 批量：发送 CSV 文件，列为 <code>货号;名称;信息</code>。\n\n已保存：{n}。{skus}",
+        "facts_saved": "✅ 已保存 {sku} 的商品信息。",
+        "facts_deleted": "已删除：{sku}。",
+        "facts_bad": "第一行为货号，第二行起为商品信息。或发送 /cancel。",
+        "csv_loaded": "✅ 已导入商品：{n}。跳过行数：{bad}。",
+        "csv_bad": "无法读取 CSV（需要列：货号;名称;信息）：{error}",
+        "autoq_on": "开启——当商品信息足以回答时",
+        "autoq_off": "关闭",
+        "btn_autoq": "自动回答问题：开/关",
+        "card_ask": "请用任何语言描述商品：是什么、材质、尺寸、特点、适用人群、包装清单。信息越多，商品卡越好——我不会编造内容。",
+        "card_wait": "正在撰写商品卡…",
+        "card_title": "标题",
+        "card_desc": "描述",
+        "card_kw": "搜索关键词",
+        "card_attrs": "商品属性",
+        "card_missing": "补充以下信息可提升销量",
+        "card_note": "点击文字即可复制。",
+        "btn_save_facts": "💾 保存为商品信息",
+        "ask_sku": "请发送要关联此描述的商品货号（nmId / SKU / offerId）。",
     },
 }
 

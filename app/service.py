@@ -78,7 +78,7 @@ class Engine:
                     await self.notifier.text(acc.tg_id, "quota_exceeded", limit=user.monthly_limit)
                 break
             try:
-                draft = await self._draft(acc.marketplace, inc, user.lang, user.signature)
+                draft, has_facts = await self._draft(acc.marketplace, inc, user)
             except ai.DraftError as e:
                 self.db.refund_quota(acc.tg_id)  # nothing was drafted; the item is retried on the next poll
                 log.warning("draft failed for %s/%s: %s", acc.id, inc.external_id, e)
@@ -90,7 +90,7 @@ class Engine:
                 status="pending", extra=inc.extra,
             )
             new += 1
-            if self._auto_ok(user.auto_min_rating, inc, draft):
+            if self._auto_ok(user, inc, draft, has_facts):
                 try:
                     await client.reply(inc.kind, inc.external_id, draft.reply, inc.extra)
                     self.db.update_item(item_id, status="auto_sent", sent_at=now())
@@ -101,13 +101,19 @@ class Engine:
         return new
 
     @staticmethod
-    def _auto_ok(min_rating: int, inc: Incoming, draft: ai.Draft) -> bool:
-        return (inc.kind == "review" and min_rating > 0 and inc.rating is not None
-                and inc.rating >= min_rating and not draft.needs_input)
+    def _auto_ok(user, inc: Incoming, draft: ai.Draft, has_facts: bool) -> bool:
+        if draft.needs_input:
+            return False
+        if inc.kind == "question":  # only when the seller's own facts about this product cover the answer
+            return bool(user.auto_questions) and has_facts
+        return user.auto_min_rating > 0 and inc.rating is not None and inc.rating >= user.auto_min_rating
 
-    async def _draft(self, marketplace: str, inc: Incoming, lang: str, signature: str) -> ai.Draft:
-        return await ai.make_draft(self.llm, marketplace=marketplace, kind=inc.kind, text=inc.text,
-                                   product=inc.product, rating=inc.rating, seller_lang=lang, signature=signature)
+    async def _draft(self, marketplace: str, inc: Incoming, user) -> tuple[ai.Draft, bool]:
+        facts, has_facts = self.db.facts_for(user.tg_id, inc.sku)
+        draft = await ai.make_draft(self.llm, marketplace=marketplace, kind=inc.kind, text=inc.text,
+                                    product=inc.product, rating=inc.rating, seller_lang=user.lang,
+                                    signature=user.signature, facts=facts)
+        return draft, has_facts
 
     # ------------------------------------------------------------------ actions from the seller
     def _load(self, item_id: int, tg_id: int) -> tuple[Item, Account]:
@@ -144,7 +150,7 @@ class Engine:
         user = self.db.get_user(tg_id)
         inc = Incoming(item.external_id, item.kind, item.text, item.product, item.sku, item.rating, item.extra_dict)
         try:
-            d = await self._draft(acc.marketplace, inc, user.lang, user.signature)
+            d, _ = await self._draft(acc.marketplace, inc, user)
         except ai.DraftError:
             self.db.refund_quota(tg_id)
             raise
@@ -159,6 +165,22 @@ class Engine:
                                                       buyer_lang=item.buyer_lang or "ru")
         self.db.update_item(item_id, draft=reply, draft_translation=back, needs_input=0)
         return self.db.get_item(item_id)
+
+
+    async def add_facts_and_redraft(self, item_id: int, tg_id: int, facts: str) -> Item:
+        """Seller answers the 'needs facts' prompt once; the facts are reused for every future question."""
+        item, _ = self._load(item_id, tg_id)
+        self.db.set_facts(tg_id, item.sku or "*", facts[:4000], name=item.product)
+        return await self.regenerate(item_id, tg_id)
+
+    async def make_card(self, tg_id: int, product_info: str) -> ai.Card:
+        if not self.db.try_consume_quota(tg_id):
+            raise QuotaError()
+        try:
+            return await ai.make_card(self.llm, product_info=product_info, seller_lang=self.db.get_user(tg_id).lang)
+        except ai.DraftError:
+            self.db.refund_quota(tg_id)
+            raise
 
 
 class QuotaError(Exception):

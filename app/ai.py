@@ -25,8 +25,10 @@ Rules for the reply to the buyer:
 - Polite, warm, specific to what the buyer wrote. 1-4 sentences, at most 500 characters.
 - Never include links, phone numbers, e-mails or messengers; never invite the buyer to contact outside the marketplace.
 - Never promise refunds, compensation, gifts or discounts. Never ask the buyer to change or delete a rating.
-- Never invent product facts (sizes, materials, compatibility, stock, delivery dates). If a correct answer needs facts
-  that are not in the input, write a short polite reply the seller will complete and set "needs_input" to true.
+- "product_facts" come from the seller and are true; use them (translated into the buyer's language) to answer.
+- Never invent product facts (sizes, materials, compatibility, stock, delivery dates) that are not in "product_facts".
+  If a correct answer needs facts that are not there, write a short polite reply the seller will complete
+  and set "needs_input" to true.
 - Negative review: apologise, acknowledge the concrete problem, say in general terms what the seller does about it
   (e.g. "we passed this to quality control"); if relevant, remind that returns go through the marketplace rules.
 - Positive review without text: thank briefly, vary wording, no clichés.
@@ -88,10 +90,11 @@ async def _ask(llm: LLM, system: str, payload: dict) -> dict:
 
 
 async def make_draft(llm: LLM, *, marketplace: str, kind: str, text: str, product: str, rating: int | None,
-                     seller_lang: str, signature: str = "") -> Draft:
+                     seller_lang: str, signature: str = "", facts: str = "") -> Draft:
     system = DRAFT_SYSTEM.format(mp=MP_NAMES.get(marketplace, marketplace),
                                  seller_lang=LANG_NAMES.get(seller_lang, seller_lang))
-    payload = {"kind": kind, "product": product, "rating": rating, "text": text, "signature": signature}
+    payload = {"kind": kind, "product": product, "rating": rating, "text": text, "signature": signature,
+               "product_facts": facts}
     try:
         d = await _ask(llm, system, payload)
     except LLMError as e:
@@ -123,3 +126,58 @@ async def translate_seller_reply(llm: LLM, *, seller_text: str, seller_lang: str
     if not reply:
         raise DraftError("модель вернула пустой перевод")
     return reply[:MAX_REPLY], str(d.get("reply_translation") or seller_text).strip()
+
+
+# ------------------------------------------------------------------ product card localisation
+CARD_SYSTEM = """You are an e-commerce copywriter for Russian marketplaces (Wildberries, Ozon, Yandex Market).
+A seller describes a product in any language. Write a Russian product card optimised for marketplace search.
+Return ONLY one JSON object, without markdown.
+
+Rules:
+- Use ONLY facts from the seller's input. Never invent specifications, materials, sizes, certificates,
+  country of origin or guarantees. Put important facts buyers will look for but the seller did not give into "missing".
+- "title": Russian, at most 60 characters: product type + key feature + brand/model if given.
+  No CAPS, no emojis, no words like «лучший», «№1», «хит», «топ», no other brands.
+- "description": Russian, 800-1500 characters, plain paragraphs: benefits first, then usage and care.
+  Naturally include the main search phrases. No links, contacts, prices or delivery promises.
+- "keywords": 15-25 Russian search phrases real buyers type, from generic to specific, lowercase.
+- "attributes": key characteristics [{{"name": "...", "value": "..."}}] in Russian, only from the input.
+- "seller_summary": 2-3 sentences in {seller_lang}: what the card emphasises and why.
+- "missing": list of strings in {seller_lang}: facts to add to make the card stronger.
+
+JSON keys: "title", "description", "keywords", "attributes", "seller_summary", "missing".
+"""
+
+TITLE_LIMIT = 60
+
+
+@dataclass
+class Card:
+    title: str
+    description: str
+    keywords: list[str]
+    attributes: list[tuple[str, str]]
+    seller_summary: str
+    missing: list[str]
+
+
+def _str_list(v) -> list[str]:
+    return [str(x).strip() for x in v if str(x).strip()] if isinstance(v, list) else []
+
+
+async def make_card(llm: LLM, *, product_info: str, seller_lang: str) -> Card:
+    system = CARD_SYSTEM.format(seller_lang=LANG_NAMES.get(seller_lang, seller_lang))
+    try:
+        d = await _ask(llm, system, {"product_info": product_info})
+    except LLMError as e:
+        raise DraftError(str(e)) from e
+    title, description = str(d.get("title") or "").strip(), str(d.get("description") or "").strip()
+    if not title or not description:
+        raise DraftError("модель не вернула название или описание")
+    attrs = []
+    for a in d.get("attributes") or []:
+        if isinstance(a, dict) and a.get("name") and a.get("value"):
+            attrs.append((str(a["name"]).strip(), str(a["value"]).strip()))
+    return Card(title=title, description=description[:3000], keywords=_str_list(d.get("keywords"))[:30],
+                attributes=attrs[:30], seller_summary=str(d.get("seller_summary") or "").strip(),
+                missing=_str_list(d.get("missing"))[:15])

@@ -21,9 +21,10 @@ from .service import Engine
 log = logging.getLogger("app")
 
 COMMANDS = {
-    "ru": ["Подключить магазин", "Мои магазины", "Проверить сейчас", "Настройки", "Справка"],
-    "en": ["Connect a shop", "My shops", "Check now", "Settings", "Help"],
-    "zh": ["连接店铺", "我的店铺", "立即检查", "设置", "帮助"],
+    "ru": ["Подключить магазин", "Карточка товара на русском", "Факты о товарах", "Мои магазины",
+           "Проверить сейчас", "Настройки", "Справка"],
+    "en": ["Connect a shop", "Russian product card", "Product facts", "My shops", "Check now", "Settings", "Help"],
+    "zh": ["连接店铺", "俄语商品卡", "商品信息", "我的店铺", "立即检查", "设置", "帮助"],
 }
 
 
@@ -50,7 +51,7 @@ async def main() -> None:
 
     for lang, names in COMMANDS.items():
         cmds = [BotCommand(command=c, description=d)
-                for c, d in zip(("connect", "accounts", "sync", "settings", "help"), names)]
+                for c, d in zip(("connect", "card", "facts", "accounts", "sync", "settings", "help"), names)]
         await bot.set_my_commands(cmds, language_code=None if lang == "ru" else lang)
 
     poller = asyncio.create_task(poll_loop(engine, s.poll_interval_sec))
