@@ -1,0 +1,4 @@
+aiogram>=3.13,<4
+aiohttp-socks>=0.9
+httpx>=0.27,<1
+cryptography>=42
