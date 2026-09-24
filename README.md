@@ -39,6 +39,17 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
 В Telegram: `/start` → язык → `/connect` → **Demo**. Придут 5 тестовых карточек: негативный отзыв, отзыв без текста, вопросы на кыргызском и русском, отзыв на узбекском. Режим Demo подходит и для записи видео для краудфандинга.
 
+## Запуск на своём компьютере (для теста и демо-видео)
+
+**Windows 10/11:**
+1. Скачайте код, войдя в GitHub: https://github.com/maksik2669-afk404/EMPIRE/archive/refs/heads/claude/busy-fermat-c2av78.zip и распакуйте архив.
+2. Откройте папку `deploy\windows` и дважды щёлкните `start.bat`.
+3. Вставьте ключи, когда скрипт попросит. Python, если его нет, скрипт поставит сам через winget.
+
+**macOS / Linux:** `NO_SERVICE=1 APP_DIR=$HOME/empire bash deploy/install.sh && cd ~/empire && .venv/bin/python -m app.main`
+
+Бот работает, пока компьютер включён и не спит. Для реальных продавцов нужен сервер — см. ниже.
+
 ## Установка на сервер одной командой (рекомендуется)
 
 1. Арендуйте VPS в РФ: Ubuntu 24.04 (или 22.04), 1 vCPU, 1 ГБ RAM — этого достаточно.
