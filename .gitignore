@@ -5,3 +5,7 @@ data/*.db*
 .pytest_cache/
 .venv/
 .env.salesbot
+
+# Записи сигнала с плёнки: 200 Гц * час = ~720 тыс. строк, в репозиторий не кладём
+утро/tools/captures/
+*.utro.csv
