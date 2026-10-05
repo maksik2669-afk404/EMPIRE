@@ -5,7 +5,14 @@ import pytest
 
 from morning import synth
 from morning.digest import render
-from morning.dsp import WindowResult, analyze_window, bandpass, goertzel, peaks
+from morning.dsp import (
+    PEAK_SNR_RELIABLE,
+    WindowResult,
+    analyze_window,
+    bandpass,
+    goertzel,
+    peaks,
+)
 from morning.night import RESP_MISSING_ALARM, NightRecorder
 from morning.presence import BedFusion, BedState, LoadReading
 
@@ -62,6 +69,84 @@ def test_respiration_rate_recovered():
 def test_heart_rate_recovered_when_signal_is_strong():
     r = analyze_window(_one_person(resp=15.0, hr=62.0), FS)
     assert r.hr_bpm == pytest.approx(62.0, abs=3.0)
+
+
+def _breathing_thumps(resp=15.0, amp=0.35, rng=None):
+    """Дыхание с резким толчком вдоха и БЕЗ сердца вовсе.
+
+    Толчок вдоха широкополосный, он попадает и в кардиополосу 4-20 Гц. Поезд
+    таких толчков с частотой дыхания даёт в огибающей кардиополосы — ровно в
+    той, по которой ищется пульс, — гребёнку на всех кратностях частоты
+    дыхания. При 15 вд/мин это 30, 45, 60, 75, 90 в минуту, то есть вся полоса
+    пульса. Поэтому synth.heartbeats здесь вызван с ЧАСТОТОЙ ДЫХАНИЯ: это не
+    сердце, это форма дыхательного толчка.
+    """
+    rng = rng or _rng()
+    return synth.mix(
+        synth.breathing(DUR, FS, resp, 1.0),
+        synth.heartbeats(DUR, FS, resp, amp),
+        synth.noise(DUR, FS, 0.05, rng),
+    )
+
+
+def test_breathing_harmonic_is_not_reported_as_pulse():
+    """Сердца в сигнале нет вовсе, а гармоника дыхания стоит в полосе пульса и
+    выглядит уверенным пиком. Ошибка такого рода неотличима от успеха, поэтому
+    проверяем и то, что пик действительно уверенный."""
+    r = analyze_window(_breathing_thumps(resp=15.0, amp=0.35), FS)
+    assert r.resp_bpm == pytest.approx(15.0, abs=1.0)
+    # Без проверки на гармонику это число было бы выдано человеку как пульс.
+    assert r.hr_snr >= PEAK_SNR_RELIABLE
+    assert r.hr_bpm is None
+    assert r.hr_harmonic_suspect
+    assert r.hr_resp_harmonic is not None
+
+
+def test_breathing_harmonic_refused_at_several_rates():
+    """Отказ не должен зависеть от того, на какую кратность попала гребёнка."""
+    for resp in (12.0, 15.0, 18.0, 22.0):
+        r = analyze_window(_breathing_thumps(resp=resp, amp=0.6), FS)
+        assert r.hr_bpm is None, f"выдан пульс {r.hr_bpm} при дыхании {resp} без сердца"
+        assert r.hr_harmonic_suspect
+
+
+def test_real_pulse_exactly_on_resp_multiple_is_kept():
+    """Пульс 60 при дыхании 15 — ровно 4-я кратность. Выбрасывать его нельзя:
+    такое совпадение случается само собой, а не только у гармоники. Различает
+    не близость частот, а то, насколько пик выше остальной гребёнки."""
+    r = analyze_window(_one_person(resp=15.0, hr=60.0), FS)
+    assert r.hr_resp_harmonic == 4            # близость к кратности замечена
+    assert not r.hr_harmonic_suspect          # но пик выделяется над гребёнкой
+    assert r.hr_comb_dominance is not None and r.hr_comb_dominance > 2.0
+    assert r.hr_bpm == pytest.approx(60.0, abs=3.0)
+
+
+def test_real_pulse_near_multiple_kept_across_rates():
+    for resp, hr in ((15.0, 60.0), (20.0, 60.0), (15.0, 75.0), (12.0, 72.0), (18.0, 72.0)):
+        r = analyze_window(_one_person(resp=resp, hr=hr), FS)
+        assert r.hr_bpm == pytest.approx(hr, abs=3.0), (
+            f"потерян настоящий пульс {hr} при дыхании {resp}"
+        )
+
+
+def test_harmonic_check_is_silent_when_pulse_is_far_from_multiple():
+    """85 уд/мин при дыхании 15 — это 5.67 кратности, ни на что не похоже.
+    Признаки гармоники не должны выставляться на пустом месте."""
+    r = analyze_window(_one_person(resp=15.0, hr=85.0), FS)
+    assert r.hr_bpm == pytest.approx(85.0, abs=3.0)
+    assert r.hr_resp_harmonic is None
+    assert not r.hr_harmonic_suspect
+    assert r.hr_comb_dominance is None
+
+
+def test_window_result_still_builds_from_seven_positional_fields():
+    """night.py, hub/system.py и часть тестов создают WindowResult позиционно
+    из семи полей. Новые поля обязаны иметь значения по умолчанию."""
+    w = WindowResult(True, 1, 15.0, 62.0, False, 40.0, 9.0)
+    assert not w.hr_harmonic_suspect
+    assert w.hr_resp_harmonic is None
+    assert w.hr_comb_dominance is None
+    assert w.resp_reliable
 
 
 def test_empty_bed_is_not_reported_occupied():
