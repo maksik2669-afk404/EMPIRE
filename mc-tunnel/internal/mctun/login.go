@@ -28,9 +28,10 @@ const (
 	pkLoginSuccess      = 0x02
 	pkSetCompression    = 0x03
 
-	// Play IDs (defaults for 1.20.1)
-	PlayCustomPayloadClientbound = 0x18
-	PlayCustomPayloadServerbound = 0x14
+	// Play IDs for protocol 763 (1.20 / 1.20.1), verified against
+	// PrismarineJS/minecraft-data (pc/1.20 protocol.json).
+	PlayCustomPayloadClientbound = 0x17
+	PlayCustomPayloadServerbound = 0x0d
 	PlayKeepAliveClientbound     = 0x23
 	PlayKeepAliveServerbound     = 0x12
 )
