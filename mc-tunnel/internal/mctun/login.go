@@ -70,7 +70,11 @@ func writeHandshake(conn *mcproto.Conn, host string, port uint16) error {
 }
 
 func writeLoginStart(conn *mcproto.Conn, name string, uuid [16]byte) error {
+	// Protocol 763 Login Start: Name (String), Has Player UUID (Boolean),
+	// then the UUID when present. Omitting the boolean makes the server read
+	// the first UUID byte as the flag and desync (DecoderException).
 	ls := mcproto.AppendString(nil, name)
+	ls = append(ls, 0x01) // Has Player UUID = true
 	ls = append(ls, uuid[:]...)
 	return conn.WritePacket(pkLoginStart, ls)
 }
