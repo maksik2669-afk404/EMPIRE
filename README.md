@@ -33,6 +33,7 @@ Telegram-бот для продавцов маркетплейсов:
 - **Сметчик** (`smeta/`) — бот, который считает смету из текста и отдаёт Excel/PDF с шапкой
   компании, режет смету на процент и показывает маржу подрядчику: [smeta/README.md](smeta/README.md).
   Быстрая проверка без Telegram: `python3 -m smeta.cli --demo --profit`.
+  Папка для сервера: [smeta-server/](smeta-server/README.md) — скопировать и `sudo bash install.sh`.
 - **WINTER ARC** (`winter-arc/`), **salesbot** (`salesbot/`), идеи (`IDEAS.md`).
 
 ## Быстрый старт (5 минут, без ключей маркетплейсов)

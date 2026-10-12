@@ -1,0 +1,7 @@
+.env
+.venv/
+data/smeta.db*
+data/export/
+data/logos/
+data/import/
+__pycache__/

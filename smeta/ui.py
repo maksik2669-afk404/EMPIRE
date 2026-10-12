@@ -21,6 +21,7 @@ from aiogram.types import (
     InlineKeyboardMarkup as Markup,
     KeyboardButton,
     ReplyKeyboardMarkup,
+    WebAppInfo,
 )
 
 from . import billing, consumption, datafiles, funnel, obmer, progress, render, tax, templates
@@ -44,8 +45,14 @@ def reply_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
+def _button(text: str, data: str) -> Button:
+    if data.startswith("https://"):
+        return Button(text=text, web_app=WebAppInfo(url=data))     # кнопка мини-аппа
+    return Button(text=text, callback_data=data)
+
+
 def kb(rows: Rows, *, nav: bool = True) -> Markup:
-    keyboard = [[Button(text=text, callback_data=data) for text, data in row] for row in rows if row]
+    keyboard = [[_button(text, data) for text, data in row] for row in rows if row]
     if nav:
         keyboard.append([Button(text="⬅️ Назад", callback_data="bk"), Button(text="🏠 Меню", callback_data="hm")])
     return Markup(inline_keyboard=keyboard)
@@ -83,6 +90,10 @@ def home(ctx: Ctx) -> tuple[str, Markup]:
     lines.append(f"🏢 {escape(company.name)}" if company.name else "🏢 Компания не заполнена — начните с «Компания»")
     lines.append(billing.status_text(ctx.deps.store, ctx.tg_id))
     rows: Rows = [[("🧮 Новая смета", "a:new"), ("📂 Мои сметы", "go:list:0")]]
+    from .webapp import webapp_url
+
+    if webapp_url():
+        rows.insert(0, [("📱 Открыть приложение", webapp_url())])
     if found:
         _, estimate = found
         lines.append(f"▶️ Текущая: {escape(estimate.number)} · {rub(estimate.total())} ₽ · "

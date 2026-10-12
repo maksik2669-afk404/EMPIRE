@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Сметчик</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{
+  --bg:var(--tg-theme-bg-color,#fff);--bg2:var(--tg-theme-secondary-bg-color,#f2f3f5);
+  --text:var(--tg-theme-text-color,#111);--hint:var(--tg-theme-hint-color,#8a8f98);
+  --accent:var(--tg-theme-button-color,#2f80ed);--accent-text:var(--tg-theme-button-text-color,#fff);
+  --link:var(--tg-theme-link-color,#2f80ed);--danger:#e5484d;--ok:#30a46c;--warn:#f5a623;--r:14px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg2);color:var(--text);font:15px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+body{padding:0 0 calc(76px + env(safe-area-inset-bottom))}
+header{position:sticky;top:0;z-index:5;background:var(--bg);padding:12px 16px;display:flex;gap:10px;align-items:center;border-bottom:1px solid rgba(127,127,127,.15)}
+header h1{font-size:17px;margin:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.back{border:0;background:none;color:var(--link);font-size:15px;padding:4px 0;display:none}
+main{padding:12px;max-width:720px;margin:0 auto}
+.card{background:var(--bg);border-radius:var(--r);padding:14px;margin:0 0 12px}
+.card h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--hint);margin:0 0 10px;font-weight:600}
+.row{display:flex;justify-content:space-between;gap:12px;padding:6px 0}
+.row+.row{border-top:1px solid rgba(127,127,127,.12)}
+.muted{color:var(--hint);font-size:13px}
+.big{font-size:28px;font-weight:700;letter-spacing:-.02em}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:0;border-radius:12px;padding:12px 14px;font-size:15px;font-weight:600;background:var(--accent);color:var(--accent-text);width:100%;cursor:pointer}
+.btn.secondary{background:var(--bg2);color:var(--text)}
+.btn.danger{background:transparent;color:var(--danger)}
+.btn:disabled{opacity:.5}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{border:1px solid rgba(127,127,127,.25);background:var(--bg);color:var(--text);border-radius:999px;padding:8px 12px;font-size:14px;cursor:pointer}
+.chip.on{background:var(--accent);color:var(--accent-text);border-color:transparent}
+.item{display:flex;gap:10px;align-items:flex-start;padding:10px 0;cursor:pointer}
+.item+.item{border-top:1px solid rgba(127,127,127,.12)}
+.item .grow{flex:1;min-width:0}
+.item .name{font-weight:500;overflow-wrap:anywhere}
+.item .sum{font-weight:600;white-space:nowrap}
+.badge{display:inline-block;font-size:12px;padding:2px 8px;border-radius:999px;background:var(--bg2);color:var(--hint)}
+.badge.warn{background:rgba(245,166,35,.15);color:#b7791f}
+label{display:block;font-size:13px;color:var(--hint);margin:10px 0 4px}
+input,textarea,select{width:100%;border:1px solid rgba(127,127,127,.25);background:var(--bg);color:var(--text);border-radius:10px;padding:11px 12px;font:inherit}
+textarea{min-height:96px;resize:vertical}
+.rooms .room{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:6px;margin-bottom:6px}
+.rooms .room2{display:grid;grid-template-columns:1fr 1fr auto;gap:6px;margin-bottom:12px}
+.rooms input{padding:9px 8px}
+.warnings div{color:#b7791f;font-size:13px;padding:3px 0}
+.best{outline:2px solid var(--ok)}
+.blocked{opacity:.55}
+nav{position:fixed;left:0;right:0;bottom:0;background:var(--bg);display:grid;grid-template-columns:repeat(4,1fr);padding:6px 6px calc(6px + env(safe-area-inset-bottom));border-top:1px solid rgba(127,127,127,.15);z-index:6}
+nav button{border:0;background:none;color:var(--hint);font-size:11px;padding:6px 0;display:flex;flex-direction:column;align-items:center;gap:2px}
+nav button span{font-size:20px}
+nav button.on{color:var(--accent)}
+.sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:10;display:none;align-items:flex-end}
+.sheet{background:var(--bg);width:100%;border-radius:18px 18px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom));max-height:88vh;overflow:auto}
+.toast{position:fixed;left:50%;bottom:calc(90px + env(safe-area-inset-bottom));transform:translateX(-50%);background:rgba(20,20,20,.88);color:#fff;padding:10px 14px;border-radius:12px;font-size:14px;z-index:20;max-width:90%;display:none}
+.empty{text-align:center;color:var(--hint);padding:24px 8px}
+.spacer{height:8px}
+</style>
+</head>
+<body>
+<header><button class="back" id="back">‹ Назад</button><h1 id="title">Сметчик</h1></header>
+<main id="app"><div class="empty">Загрузка…</div></main>
+<nav id="tabs">
+  <button data-tab="home" class="on"><span>🧮</span>Сметы</button>
+  <button data-tab="obmer"><span>📐</span>Обмер</button>
+  <button data-tab="templates"><span>🏗</span>Шаблоны</button>
+  <button data-tab="tax"><span>🧾</span>Налоги</button>
+</nav>
+<div class="sheet-bg" id="sheetBg"><div class="sheet" id="sheet"></div></div>
+<div class="toast" id="toast"></div>
+<script>
+const tg = window.Telegram ? window.Telegram.WebApp : null;
+if (tg) { tg.ready(); tg.expand(); }
+const $ = (id) => document.getElementById(id);
+const fmt = new Intl.NumberFormat("ru-RU", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const rub = (v) => fmt.format(v || 0) + " ₽";
+const num = (v) => new Intl.NumberFormat("ru-RU", {maximumFractionDigits: 3}).format(v || 0);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const haptic = (kind) => { try { tg && tg.HapticFeedback.notificationOccurred(kind); } catch (e) {} };
+
+let state = null;               // /api/state
+let stack = [];                 // [{view, params}]
+let rooms = JSON.parse(localStorage.getItem("rooms") || "[]");
+let chosenWorks = new Set(JSON.parse(localStorage.getItem("works") || "[]"));
+
+function toast(text, ms = 2600) {
+  const el = $("toast"); el.textContent = text; el.style.display = "block";
+  clearTimeout(toast.t); toast.t = setTimeout(() => el.style.display = "none", ms);
+}
+
+async function api(path, body = {}) {
+  const res = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json",
+    "X-Init-Data": tg ? tg.initData : ""}, body: JSON.stringify(body)});
+  let data = {};
+  try { data = await res.json(); } catch (e) {}
+  if (!res.ok) { haptic("error"); throw new Error(data.error || "ошибка сети"); }
+  return data;
+}
+
+async function guarded(fn) {
+  try { return await fn(); } catch (e) { toast("⚠️ " + e.message, 4000); }
+}
+
+// ---------------------------------------------------------------- navigation
+
+function go(view, params = {}) { stack.push({view, params}); render(); }
+function back() { if (stack.length > 1) { stack.pop(); render(); } }
+function tab(name) { stack = [{view: name, params: {}}]; render(); }
+
+$("back").onclick = back;
+if (tg) tg.BackButton.onClick(back);
+document.querySelectorAll("#tabs button").forEach((b) => b.onclick = () => tab(b.dataset.tab));
+
+function chrome(title) {
+  $("title").textContent = title;
+  const canBack = stack.length > 1;
+  $("back").style.display = canBack && !tg ? "inline" : "none";
+  if (tg) canBack ? tg.BackButton.show() : tg.BackButton.hide();
+  const root = stack[0].view;
+  document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === root));
+}
+
+async function render() {
+  const {view, params} = stack[stack.length - 1];
+  const views = {home, estimate, create, obmer, templates, tax};
+  window.scrollTo(0, 0);
+  await guarded(() => views[view](params));
+}
+
+// ---------------------------------------------------------------- sheet
+
+function openSheet(html, bind) {
+  $("sheet").innerHTML = html; $("sheetBg").style.display = "flex";
+  if (bind) bind($("sheet"));
+}
+function closeSheet() { $("sheetBg").style.display = "none"; }
+$("sheetBg").onclick = (e) => { if (e.target.id === "sheetBg") closeSheet(); };
+
+// ---------------------------------------------------------------- home
+
+async function home() {
+  chrome("Сметчик");
+  state = await api("/api/state");
+  const list = state.estimates.map((e) => `
+    <div class="item" data-id="${e.id}">
+      <div class="grow"><div class="name">${esc(e.number)}</div>
+      <div class="muted">${esc(e.status_title)} · ${esc(e.updated)}</div></div>
+      <div class="sum">${rub(e.total)}</div></div>`).join("");
+  $("app").innerHTML = `
+    <div class="card"><div class="muted">${esc(state.company.name || "Компания не заполнена — заполните в боте")}</div>
+      <div class="muted">${esc(state.subscription)}</div></div>
+    <button class="btn" id="new" ${state.can_create ? "" : "disabled"}>🧮 Новая смета</button>
+    <div class="spacer"></div>
+    <div class="card"><h2>Мои сметы</h2>${list || '<div class="empty">Смет пока нет</div>'}</div>`;
+  $("new").onclick = () => go("create");
+  document.querySelectorAll("[data-id]").forEach((el) => el.onclick = () => go("estimate", {id: +el.dataset.id}));
+}
+
+async function create() {
+  chrome("Новая смета");
+  $("app").innerHTML = `<div class="card">
+    <label>🏠 Объект</label><input id="obj" placeholder="г. Москва, ул. Ленина, 5">
+    <label>👤 Заказчик</label><input id="cust" placeholder="ООО «Ромашка», ИНН">
+    <label>📋 Договор</label><input id="contract" placeholder="№ 14 от 01.10.2026"></div>
+    <button class="btn" id="save">Создать</button>`;
+  $("save").onclick = () => guarded(async () => {
+    const e = await api("/api/estimates", {object: $("obj").value, customer: $("cust").value, contract: $("contract").value});
+    haptic("success"); stack.pop(); go("estimate", {id: e.id});
+  });
+}
+
+// ---------------------------------------------------------------- estimate
+
+let est = null;
+async function estimate({id}) {
+  est = await api(`/api/estimates/${id}`);
+  drawEstimate();
+}
+
+function drawEstimate(matches) {
+  chrome(est.number || "Смета");
+  const t = est.totals;
+  const limited = t.limited.map((l) => `<div class="row"><span>${esc(l.name)} ${num(l.pct)}%</span><span>${rub(l.amount)}</span></div>`).join("");
+  const rows = est.positions.map((p) => `
+    <div class="item" data-pos="${p.index}">
+      <div class="grow"><div class="name">${p.index}. ${p.kind === "material" ? "🧱 " : ""}${esc(p.name)}</div>
+        <div class="muted">${num(p.qty)} ${esc(p.unit)} × ${rub(p.price)}${p.done ? ` · ✅ ${num(p.done)}` : ""}</div>
+        ${p.needs_price ? '<span class="badge warn">нужна цена</span>' : ""}${p.coef ? ' <span class="badge">К</span>' : ""}</div>
+      <div class="sum">${rub(p.total)}</div></div>`).join("");
+  const warn = est.warnings.length ? `<div class="card warnings">${est.warnings.map((w) => `<div>⚠️ ${esc(w)}</div>`).join("")}</div>` : "";
+  const matchInfo = matches ? `<div class="card">${matches.map((m) => `<div class="muted">${{matched:"✅",priced:"💬",price_list:"🧾",unit_mismatch:"⚠️",needs_price:"❓"}[m.status] || "•"} ${esc(m.name)}${m.comment ? " · " + esc(m.comment) : ""}</div>`).join("")}</div>` : "";
+  $("app").innerHTML = `
+    <div class="card">
+      <div class="muted">${esc(est.customer || "Заказчик не указан")} · ${esc(est.object || "")}</div>
+      <div class="big">${rub(t.total)}</div>
+      <div class="muted">${est.discount ? `корректировка ${est.discount > 0 ? "+" : ""}${num(est.discount)}% · ` : ""}${esc(est.index)}</div>
+      <div class="spacer"></div><button class="chip" id="status">${esc(est.status_title)} ▾</button>
+    </div>
+    ${warn}
+    <div class="card"><h2>Добавить работы</h2>
+      <textarea id="works" placeholder="штукатурка стен 120 м2&#10;стяжка пола 85 м2 по 700&#10;мат: керамогранит 22 м2"></textarea>
+      <div class="spacer"></div><button class="btn" id="add">➕ Добавить</button></div>
+    ${matchInfo}
+    <div class="card"><h2>Позиции · ${est.positions.length}</h2>${rows || '<div class="empty">Пусто — добавьте работы выше</div>'}</div>
+    <div class="card"><h2>Итоги</h2>
+      <div class="row"><span>Прямые затраты</span><span>${rub(t.direct)}</span></div>
+      ${t.nr ? `<div class="row"><span>Накладные расходы</span><span>${rub(t.nr)}</span></div>` : ""}
+      ${t.sp ? `<div class="row"><span>Сметная прибыль</span><span>${rub(t.sp)}</span></div>` : ""}
+      ${limited}
+      <div class="row"><span>Без НДС</span><span>${rub(t.subtotal)}</span></div>
+      ${est.vat_pct ? `<div class="row"><span>НДС ${num(est.vat_pct)}%</span><span>${rub(t.vat)}</span></div>` : ""}
+      <div class="row"><b>Всего</b><b>${rub(t.total)}</b></div></div>
+    <div class="card"><h2>Скидка и наценка</h2>
+      <div class="chips">${[-5,-10,-20,-30,5,10].map((v) => `<button class="chip" data-adj="${v}">${v > 0 ? "+" : "−"}${Math.abs(v)}%</button>`).join("")}
+        <button class="chip" id="reset">♻️ Сброс</button></div>
+      <label>🎯 Подогнать итог под сумму</label>
+      <div class="grid"><input id="fit" inputmode="decimal" placeholder="900 000"><button class="btn secondary" id="fitBtn">Подогнать</button></div></div>
+    <div class="card"><h2>Документы — придут в чат</h2><div class="grid">
+      <button class="btn secondary" data-doc="xlsx">📄 Excel</button><button class="btn secondary" data-doc="pdf">📕 PDF</button>
+      <button class="btn secondary" data-doc="kp">💼 КП</button><button class="btn secondary" data-doc="naryad">👷 Наряд</button>
+      <button class="btn secondary" data-doc="margin">🔒 Маржа</button><button class="btn secondary" id="mat">🧱 Материалы</button></div></div>
+    <div class="card"><h2>Выполнение</h2>
+      <div class="row"><span>Выполнено</span><span>${rub(est.progress.done)} · ${num(est.progress.done_pct)}%</span></div>
+      <div class="row"><span>Закрыто актами</span><span>${rub(est.progress.acted)}</span></div>
+      <div class="row"><span>Оплачено</span><span>${rub(est.progress.paid)}</span></div>
+      <div class="muted">Акты КС-2/КС-3 и оплаты — в боте: «📈 Выполнение и оплаты».</div></div>
+    <button class="btn secondary" id="taxBtn">🧾 Налоги по смете</button>`;
+
+  $("add").onclick = () => guarded(async () => {
+    const text = $("works").value.trim(); if (!text) return;
+    const res = await api(`/api/estimates/${est.id}/works`, {text}); est = res; haptic("success"); drawEstimate(res.matches);
+  });
+  document.querySelectorAll("[data-adj]").forEach((b) => b.onclick = () => guarded(async () => {
+    est = await api(`/api/estimates/${est.id}/adjust`, {percent: +b.dataset.adj}); drawEstimate();
+  }));
+  $("reset").onclick = () => guarded(async () => { est = await api(`/api/estimates/${est.id}/adjust`, {reset: true}); drawEstimate(); });
+  $("fitBtn").onclick = () => guarded(async () => {
+    const v = $("fit").value.replace(/\s/g, "").replace(",", "."); if (!v) return;
+    est = await api(`/api/estimates/${est.id}/adjust`, {fit: v}); drawEstimate(); toast("Итог: " + rub(est.totals.total));
+  });
+  document.querySelectorAll("[data-doc]").forEach((b) => b.onclick = () => guarded(async () => {
+    b.disabled = true; const r = await api(`/api/estimates/${est.id}/document`, {kind: b.dataset.doc});
+    b.disabled = false; haptic("success"); toast("📨 " + r.message);
+  }));
+  $("mat").onclick = () => guarded(async () => { est = await api(`/api/estimates/${est.id}/materials`); drawEstimate(); toast("🧱 Материалы по нормам добавлены"); });
+  $("taxBtn").onclick = () => go("tax", {estimate: est.id});
+  $("status").onclick = statusSheet;
+  document.querySelectorAll("[data-pos]").forEach((el) => el.onclick = () => positionSheet(+el.dataset.pos));
+}
+
+function statusSheet() {
+  const chips = (state ? state.statuses : []).map((s) => `<button class="chip ${s.code === est.status ? "on" : ""}" data-st="${s.code}">${esc(s.title)}</button>`).join("");
+  openSheet(`<h2>Статус сметы</h2><div class="chips">${chips}</div><label>Комментарий (для «Проиграно» — причина)</label><input id="note">`, (s) => {
+    s.querySelectorAll("[data-st]").forEach((b) => b.onclick = () => guarded(async () => {
+      est = await api(`/api/estimates/${est.id}/status`, {status: b.dataset.st, note: s.querySelector("#note").value});
+      closeSheet(); drawEstimate(); if (b.dataset.st === "sent") toast("📤 Напомню через 3 дня, если не ответят");
+    }));
+  });
+}
+
+function positionSheet(index) {
+  const p = est.positions[index - 1];
+  openSheet(`<h2>${index}. ${esc(p.name)}</h2>
+    <div class="muted">${esc(p.code || "договорная цена")}${p.coef ? " · " + esc(p.coef) : ""}</div>
+    <label>📏 Объём, ${esc(p.unit)}</label><input id="qty" inputmode="decimal" value="${p.qty}">
+    <label>💬 Цена за ${esc(p.unit)}, ₽</label><input id="price" inputmode="decimal" value="${p.price}">
+    <label>👷 Ставка бригады за ${esc(p.unit)}, ₽</label><input id="crew" inputmode="decimal" value="${p.crew_price ?? ""}">
+    <label>✅ Выполнено (объём, % или «всё»)</label><input id="done" value="${p.done || ""}">
+    <div class="spacer"></div><button class="btn" id="save">Сохранить</button>
+    <button class="btn danger" id="del">🗑 Удалить позицию</button>`, (s) => {
+    s.querySelector("#save").onclick = () => guarded(async () => {
+      const body = {qty: s.querySelector("#qty").value.replace(",", "."), crew_price: s.querySelector("#crew").value.replace(",", ".")};
+      const price = s.querySelector("#price").value.replace(",", ".");
+      if (+price !== p.price) body.price = price;
+      const done = s.querySelector("#done").value.trim();
+      if (done && done !== String(p.done)) body.done = done;
+      est = await api(`/api/estimates/${est.id}/positions/${index}`, body); closeSheet(); haptic("success"); drawEstimate();
+    });
+    s.querySelector("#del").onclick = () => guarded(async () => {
+      est = await api(`/api/estimates/${est.id}/positions/${index}`, {delete: true}); closeSheet(); drawEstimate();
+    });
+  });
+}
+
+// ---------------------------------------------------------------- obmer
+
+function saveRooms() { localStorage.setItem("rooms", JSON.stringify(rooms)); localStorage.setItem("works", JSON.stringify([...chosenWorks])); }
+
+async function obmer() {
+  chrome("Обмер");
+  if (!state) state = await api("/api/state");
+  if (!rooms.length) rooms.push({name: "Комната", length: "", width: "", height: "2.7", doors: 1, windows: 1});
+  const fields = rooms.map((r, i) => `
+    <div class="room"><input data-i="${i}" data-k="name" value="${esc(r.name)}" placeholder="Название">
+      <input data-i="${i}" data-k="length" inputmode="decimal" value="${esc(r.length)}" placeholder="Длина">
+      <input data-i="${i}" data-k="width" inputmode="decimal" value="${esc(r.width)}" placeholder="Ширина">
+      <input data-i="${i}" data-k="height" inputmode="decimal" value="${esc(r.height)}" placeholder="Высота"></div>
+    <div class="room2"><input data-i="${i}" data-k="doors" inputmode="numeric" value="${esc(r.doors)}" placeholder="Дверей">
+      <input data-i="${i}" data-k="windows" inputmode="numeric" value="${esc(r.windows)}" placeholder="Окон">
+      <button class="chip" data-rm="${i}">✕</button></div>`).join("");
+  const works = state.obmer_works.map((w) => `<button class="chip ${chosenWorks.has(w.key) ? "on" : ""}" data-w="${w.key}">${esc(w.label)} <span data-v="${w.var}"></span></button>`).join("");
+  $("app").innerHTML = `
+    <div class="card rooms"><h2>Помещения · метры</h2><div class="muted">длина · ширина · высота, ниже — двери и окна</div><div class="spacer"></div>
+      ${fields}<button class="btn secondary" id="addRoom">➕ Помещение</button></div>
+    <div class="card" id="summary"><h2>Итого</h2><div class="muted">Введите размеры</div></div>
+    <div class="card"><h2>Какие работы</h2><div class="chips">${works}</div></div>
+    <div class="grid"><button class="btn" id="toCurrent">В текущую смету</button><button class="btn secondary" id="toNew">Новой сметой</button></div>`;
+  document.querySelectorAll(".rooms input").forEach((el) => el.oninput = () => {
+    rooms[+el.dataset.i][el.dataset.k] = el.value.replace(",", "."); saveRooms(); recalc();
+  });
+  document.querySelectorAll("[data-rm]").forEach((b) => b.onclick = () => { rooms.splice(+b.dataset.rm, 1); saveRooms(); obmer(); });
+  $("addRoom").onclick = () => { rooms.push({name: `Помещение ${rooms.length + 1}`, length: "", width: "", height: rooms[0]?.height || "2.7", doors: 1, windows: 1}); saveRooms(); obmer(); };
+  document.querySelectorAll("[data-w]").forEach((b) => b.onclick = () => {
+    chosenWorks.has(b.dataset.w) ? chosenWorks.delete(b.dataset.w) : chosenWorks.add(b.dataset.w); b.classList.toggle("on"); saveRooms();
+  });
+  const apply = (fresh) => guarded(async () => {
+    const e = await api("/api/obmer/apply", {rooms: validRooms(), works: [...chosenWorks], estimate_id: state.current_id, new: fresh});
+    haptic("success"); toast("➕ Работы добавлены"); state.current_id = e.id; stack = [{view: "home", params: {}}]; go("estimate", {id: e.id});
+  });
+  $("toCurrent").onclick = () => apply(!state.current_id);
+  $("toNew").onclick = () => apply(true);
+  recalc();
+}
+
+function validRooms() { return rooms.filter((r) => +r.length > 0 && +r.width > 0 && +r.height > 0); }
+
+let recalcTimer = null;
+function recalc() {
+  clearTimeout(recalcTimer);
+  recalcTimer = setTimeout(() => guarded(async () => {
+    const valid = validRooms(); if (!valid.length) return;
+    const r = await api("/api/obmer", {rooms: valid}); const s = r.summary;
+    $("summary").innerHTML = `<h2>Итого · ${valid.length} пом.</h2>
+      <div class="row"><span>Пол / потолок</span><b>${num(s.S)} м²</b></div>
+      <div class="row"><span>Стены без проёмов</span><b>${num(s.W)} м²</b></div>
+      <div class="row"><span>Периметр / плинтус</span><b>${num(s.P)} / ${num(s.L)} м</b></div>
+      <div class="row"><span>Откосы</span><b>${num(s.K)} м</b></div>`;
+    document.querySelectorAll("[data-v]").forEach((el) => el.textContent = "· " + num(s[el.dataset.v]));
+  }), 350);
+}
+
+// ---------------------------------------------------------------- templates
+
+async function templates() {
+  chrome("Шаблоны");
+  if (!state) state = await api("/api/state");
+  const chips = state.templates.map((t, i) => `<button class="chip ${i === 0 ? "on" : ""}" data-t="${t.code}">${esc(t.title)}</button>`).join("");
+  $("app").innerHTML = `
+    <div class="card"><h2>Что делаем</h2><div class="chips">${chips}</div></div>
+    <div class="card"><div class="grid">
+      <div><label>📏 Площадь, м²</label><input id="area" inputmode="decimal" placeholder="56"></div>
+      <div><label>↕️ Высота, м</label><input id="height" inputmode="decimal" value="2.7"></div>
+      <div><label>🚪 Комнат</label><input id="rooms" inputmode="numeric" value="2"></div>
+      <div><label>🛁 Санузлов</label><input id="baths" inputmode="numeric" value="1"></div></div>
+      <label>📐 Периметр, м (не знаете — оставьте пустым)</label><input id="perimeter" inputmode="decimal">
+      <div class="spacer"></div><button class="btn" id="calc">Рассчитать</button></div>
+    <div id="preview"></div>`;
+  let code = state.templates[0]?.code;
+  document.querySelectorAll("[data-t]").forEach((b) => b.onclick = () => {
+    document.querySelectorAll("[data-t]").forEach((x) => x.classList.remove("on")); b.classList.add("on"); code = b.dataset.t;
+  });
+  const params = () => ({code, area: $("area").value.replace(",", "."), height: $("height").value.replace(",", "."),
+    rooms: $("rooms").value, baths: $("baths").value, perimeter: $("perimeter").value.replace(",", ".")});
+  $("calc").onclick = () => guarded(async () => {
+    const r = await api("/api/templates/preview", params());
+    $("preview").innerHTML = `<div class="card"><h2>Предварительно</h2><div class="big">${rub(r.total)}</div>
+      ${r.notes.map((n) => `<div class="muted">ℹ️ ${esc(n)}</div>`).join("")}
+      ${r.positions.map((p) => `<div class="item"><div class="grow"><div class="name">${esc(p.name)}</div><div class="muted">${num(p.qty)} ${esc(p.unit)}</div></div><div class="sum">${rub(p.total)}</div></div>`).join("")}
+      <div class="spacer"></div><div class="grid"><button class="btn" id="tplCur">В текущую</button><button class="btn secondary" id="tplNew">Новой сметой</button></div></div>`;
+    const apply = (fresh) => guarded(async () => {
+      const e = await api("/api/templates/apply", {...params(), estimate_id: state.current_id, new: fresh});
+      haptic("success"); state.current_id = e.id; stack = [{view: "home", params: {}}]; go("estimate", {id: e.id});
+    });
+    $("tplCur").onclick = () => apply(!state.current_id);
+    $("tplNew").onclick = () => apply(true);
+  });
+}
+
+// ---------------------------------------------------------------- tax
+
+async function tax(params) {
+  chrome("Налоги");
+  if (!state) state = await api("/api/state");
+  const st = state.settings;
+  const estimateId = params.estimate || null;
+  $("app").innerHTML = `
+    <div class="card"><h2>Кто платит</h2><div class="chips">
+      <button class="chip ${st.tax_ip ? "" : "on"}" data-ip="0">🏢 ООО</button><button class="chip ${st.tax_ip ? "on" : ""}" data-ip="1">👤 ИП</button>
+      <button class="chip ${st.tax_staff ? "on" : ""}" id="staff">👷 Есть работники</button></div>
+      <label>📅 Доход за год, ₽ (для лимитов УСН и НДС)</label><input id="annual" inputmode="decimal" value="${st.tax_annual ?? ""}"></div>
+    ${estimateId ? `<div class="card"><div class="muted">Считаю по смете: выручка, закупка материалов и оплата рабочих берутся из неё.</div></div>` : `
+    <div class="card"><h2>Сумма</h2>
+      <label>💰 Сумма договора, ₽</label><input id="revenue" inputmode="decimal">
+      <div class="grid"><div><label>🧱 Материалы, ₽</label><input id="materials" inputmode="decimal"></div>
+      <div><label>👷 Рабочим, ₽</label><input id="payroll" inputmode="decimal"></div></div></div>`}
+    <button class="btn" id="calc">Посчитать</button><div class="spacer"></div>
+    <div id="result"></div>
+    <div class="card"><h2>🎯 Хочу на руки</h2><div class="grid"><input id="net" inputmode="decimal" placeholder="300 000"><button class="btn secondary" id="target">Какую цену ставить</button></div><div id="targetResult"></div></div>`;
+  const body = () => {
+    const b = {ip: !!st.tax_ip, staff: !!st.tax_staff, annual: $("annual").value.replace(/\s/g, "")};
+    if (estimateId) b.estimate_id = estimateId;
+    else Object.assign(b, {revenue: $("revenue").value.replace(/\s/g, ""), materials: $("materials").value.replace(/\s/g, ""), payroll: $("payroll").value.replace(/\s/g, "")});
+    return b;
+  };
+  document.querySelectorAll("[data-ip]").forEach((b) => b.onclick = () => { st.tax_ip = b.dataset.ip === "1"; tax(params); });
+  $("staff").onclick = () => { st.tax_staff = !st.tax_staff; tax(params); };
+  $("calc").onclick = () => guarded(async () => {
+    const r = await api("/api/tax", body());
+    const firstOk = r.results.findIndex((x) => !x.blocked);
+    $("result").innerHTML = r.results.map((x, i) => `<div class="card ${i === firstOk ? "best" : ""} ${x.blocked ? "blocked" : ""}">
+      <h2>${esc(x.title)}${i === firstOk ? " · выгоднее всего" : ""}</h2>
+      ${x.blocked ? `<div>❌ ${esc(x.blocked)}</div>` : `
+        ${x.items.map((it) => `<div class="row"><span>${esc(it.name)}</span><span>${rub(it.amount)}</span></div>`).join("")}
+        <div class="row"><span>Налогов · ${num(x.burden)}%</span><b>${rub(x.total)}</b></div>
+        <div class="row"><span>Остаётся</span><b>${rub(x.net)}</b></div>
+        ${x.notes.map((n) => `<div class="muted">• ${esc(n)}</div>`).join("")}`}</div>`).join("")
+      + `<div class="muted" style="padding:0 4px 12px">Ставки ${r.year} года. Расчёт для планирования, не декларация.</div>`;
+  });
+  $("target").onclick = () => guarded(async () => {
+    const r = await api("/api/tax/target", {...body(), net: $("net").value.replace(/\s/g, "")});
+    $("targetResult").innerHTML = r.results.map((x) => `<div class="row"><span>${esc(x.title)}</span><b>${x.blocked ? "❌" : rub(x.revenue)}</b></div>`).join("");
+  });
+  if (estimateId) $("calc").click();
+}
+
+// ---------------------------------------------------------------- start
+
+(async () => {
+  const start = new URLSearchParams(location.search).get("view") || (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || "home";
+  stack = [{view: ["home", "obmer", "templates", "tax"].includes(start) ? start : "home", params: {}}];
+  if (!tg || !tg.initData) { $("app").innerHTML = '<div class="empty">Откройте приложение из Телеграма — кнопкой в боте.</div>'; return; }
+  await render();
+})();
+</script>
+</body>
+</html>

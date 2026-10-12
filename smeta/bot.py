@@ -20,6 +20,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     BotCommand,
     CallbackQuery,
+    MenuButtonWebApp,
+    WebAppInfo,
     FSInputFile,
     InlineKeyboardButton as Button,
     InlineKeyboardMarkup as Markup,
@@ -28,7 +30,7 @@ from aiogram.types import (
 )
 
 from . import (
-    billing, consumption, datafiles, docs, funnel, importer, obmer, progress, render, tax, templates, ui,
+    billing, consumption, datafiles, docs, funnel, importer, obmer, progress, render, tax, templates, ui, webapp,
 )
 from .audit import audit, report_xlsx
 from .builder import build, build_from_text
@@ -1316,12 +1318,20 @@ async def run() -> None:
     dispatcher = Dispatcher(storage=MemoryStorage())
     dispatcher.include_router(router)
     await bot.set_my_commands([BotCommand(command=c, description=d) for c, d in COMMANDS])
+    runner = await webapp.start(deps, bot, token)
+    url = webapp.webapp_url()
+    if url:
+        await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(text="📱 Сметчик", web_app=WebAppInfo(url=url)))
+    elif os.getenv("SMETA_WEBAPP_URL"):
+        log.warning("SMETA_WEBAPP_URL должен начинаться с https:// — Телеграм не откроет мини-апп по http")
     task = asyncio.create_task(reminder_loop(bot, deps))
     log.info("Сметчик запущен: расценок %s, прайс %s", len(deps.catalog.rates), len(deps.offers.offers))
     try:
         await dispatcher.start_polling(bot, deps=deps)
     finally:
         task.cancel()
+        if runner is not None:
+            await runner.cleanup()
         deps.store.close()
         await bot.session.close()
 
