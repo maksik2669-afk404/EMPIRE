@@ -358,3 +358,42 @@ def compare_text(inputs: Money, rates: TaxRates | None = None) -> str:
     lines.append("Это расчёт для планирования, а не налоговая декларация: лимиты и прогрессия "
                  "считаются от годового дохода, его можно задать точнее.")
     return "\n".join(lines)
+
+
+def price_for(target_net, regime: str, *, materials=ZERO, payroll=ZERO, other_costs=ZERO, vat_pct=Decimal(20),
+              employees: bool = True, ip: bool = False, annual_revenue=None, suppliers_with_vat: bool = True,
+              rates: TaxRates | None = None) -> tuple[Decimal, TaxResult, Money]:
+    """Smallest estimate total that leaves `target_net` after costs and taxes (to the kopeck)."""
+    rates = rates or TaxRates.load()
+    target = money(target_net)
+    vat_rate = dec(vat_pct)
+
+    def run(revenue: Decimal) -> tuple[Decimal, TaxResult, Money]:
+        vat = money(revenue * vat_rate / (100 + vat_rate)) if vat_rate else ZERO
+        inputs = Money(revenue=revenue, vat_in_revenue=vat, materials=materials, payroll=payroll,
+                       other_costs=other_costs, employees=employees, ip=ip,
+                       annual_revenue=annual_revenue, suppliers_with_vat=suppliers_with_vat)
+        result = calculate(regime, inputs, rates)
+        return result.net(inputs), result, inputs
+
+    low = ZERO
+    high = money((dec(materials) + dec(payroll) + dec(other_costs) + target) * 3 + 1000)
+    net, result, inputs = run(high)
+    if result.blocked:
+        return high, result, inputs
+    for _ in range(12):                       # раздвигаем верхнюю границу, если налоги съели всё
+        if net >= target:
+            break
+        high *= 2
+        net, result, inputs = run(high)
+    for _ in range(80):                       # бисекция до копейки
+        if high - low <= Decimal("0.01"):
+            break
+        middle = money((low + high) / 2)
+        net, _, _ = run(middle)
+        if net >= target:
+            high = middle
+        else:
+            low = middle
+    net, result, inputs = run(high)
+    return high, result, inputs

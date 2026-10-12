@@ -137,6 +137,10 @@ def estimate_to_pdf(estimate: Estimate, path: str | Path) -> Path:
     ):
         if value:
             rows.append((label, value, False))
+    if totals.limited:
+        rows.append(("Итого по позициям", totals.smr, True))
+        for name, rate, amount in totals.limited:
+            rows.append((f"{name}, {rate:g}%", amount, False))
     rows.append(("Итого без НДС", totals.subtotal, True))
     if estimate.vat_pct:
         rows.append((f"НДС {totals.vat_pct:g}%", totals.vat, False))

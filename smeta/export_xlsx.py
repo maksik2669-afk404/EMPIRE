@@ -90,6 +90,10 @@ def _totals_block(ws, row: int, totals: Totals, estimate: Estimate) -> int:
         line("Накладные расходы", totals.nr)
     if totals.sp:
         line("Сметная прибыль", totals.sp)
+    if totals.limited:
+        line("Итого по позициям", totals.smr, bold=True)
+        for name, rate, amount in totals.limited:
+            line(f"{name}, {rate:g}%", amount)
     line("Итого без НДС", totals.subtotal, bold=True)
     if estimate.vat_pct:
         line(f"НДС {totals.vat_pct:g}%", totals.vat)
@@ -151,6 +155,8 @@ def estimate_to_xlsx(estimate: Estimate, path: str | Path) -> Path:
         for position in positions:
             number_counter += 1
             note = position.note
+            if position.k_basis:
+                note = (note + "; " if note else "") + position.k_basis
             if position.kind == MATERIAL and "материал" not in note.lower():
                 note = (note + " " if note else "") + "материал"
             row = _write_row(

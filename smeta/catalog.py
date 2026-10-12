@@ -155,8 +155,8 @@ class Catalog:
                 cat.nr_sp.update(parse_nr_sp_csv(path.read_text(encoding="utf-8")))
             elif path.name.startswith("indices") or "индекс" in path.name.lower():
                 cat.indices.update(parse_indices_csv(path.read_text(encoding="utf-8")))
-            elif path.name == "sbornik_work_type.csv":
-                continue                      # таблица соответствия сборник → вид работ
+            elif path.name in {"sbornik_work_type.csv", "coefficients.csv", "limited.csv"}:
+                continue                      # справочные таблицы, не расценки
             else:
                 try:
                     cat.rates.extend(parse_rates_csv(path.read_text(encoding="utf-8"), source=path.stem))
@@ -266,6 +266,8 @@ def parse_rates_csv(text: str, *, source: str = "") -> list[Rate]:
                if index < len(fieldnames)}
     if "name" not in columns:
         raise ValueError("в файле нет столбца с наименованием работ")
+    if not {"ot", "em", "mat", "pz"} & set(columns):
+        raise ValueError("в файле нет стоимостных столбцов (ОТ, ЭМ, МАТ) — это не таблица расценок")
     out: list[Rate] = []
     for row in reader:
         def cell(key: str, default: str = "") -> str:

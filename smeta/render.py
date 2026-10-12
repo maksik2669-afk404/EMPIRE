@@ -135,6 +135,8 @@ def estimate_text(estimate: Estimate, limit: int = MAX_POSITIONS) -> str:
             lines.append(f"Накладные расходы: {rub(totals.nr)} ₽")
         if totals.sp:
             lines.append(f"Сметная прибыль: {rub(totals.sp)} ₽")
+    for name, rate, amount in totals.limited:
+        lines.append(f"{name} {rate:g}%: {rub(amount)} ₽")
     lines.append(f"Итого без НДС: {rub(totals.subtotal)} ₽")
     if estimate.vat_pct:
         lines.append(f"НДС {totals.vat_pct:g}%: {rub(totals.vat)} ₽")

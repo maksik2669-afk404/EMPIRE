@@ -58,6 +58,13 @@ class Offer:
         return f"{self.material} {self.keywords}"
 
 
+_NOISE = {"мм", "см", "кг", "л", "м", "м2", "м3", "шт", "уп", "мешок", "меш"}
+
+
+def _meaningful(words: list[str]) -> list[str]:
+    return [w for w in words if not any(ch.isdigit() for ch in w) and w not in _NOISE and len(w) > 1]
+
+
 @dataclass
 class OfferBook:
     offers: list[Offer] = field(default_factory=list)
@@ -98,14 +105,17 @@ class OfferBook:
         p = Path(path)
         return cls.from_csv(p.read_text(encoding="utf-8")) if p.exists() else cls()
 
-    def find(self, name: str, unit: str | None = None, *, threshold: float = 0.5) -> list[Offer]:
-        """Offers for a material, cheapest purchase price first."""
-        wanted = tokens(name)
+    def find(self, name: str, unit: str | None = None, *, threshold: float = 0.6) -> list[Offer]:
+        """Offers for a material, cheapest purchase price first.
+
+        Sizes and units ('20', 'мм', 'кг') are ignored: 'Гофра 20 мм' is not 'Труба 20 мм'.
+        """
+        wanted = _meaningful(tokens(name))
         if not wanted:
             return []
         scored: list[tuple[float, Offer]] = []
         for offer in self.offers:
-            have = set(tokens(offer.search_text()))
+            have = set(_meaningful(tokens(offer.search_text())))
             if not have:
                 continue
             hits = sum(1 for word in wanted if word in have)

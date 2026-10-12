@@ -117,22 +117,34 @@ class Position:
     unit_factor: Decimal = ONE            # '100 м2' -> 100
     nr_pct: Decimal = ZERO
     sp_pct: Decimal = ZERO
-    coef: Decimal = ONE                   # поправочный коэффициент к расценке
+    coef: Decimal = ONE                   # поправочный коэффициент к объёму расценки
     adj: Decimal = ONE                    # накопленный рез/наценка
     source: str = ""
+    # коэффициенты к элементам затрат (стеснённость, высота, ночное время...)
+    k_ot: Decimal = ONE
+    k_em: Decimal = ONE
+    k_mat: Decimal = ONE
+    k_basis: str = ""
+    # выполнение: отмечено прорабом и закрыто актами КС-2 (в единицах позиции)
+    done: Decimal = ZERO
+    acted: Decimal = ZERO
+    # сдельная ставка бригады за единицу (наряд-задание)
+    crew_price: Decimal | None = None
 
     def __post_init__(self) -> None:
         self.qty = dec(self.qty)
         self.unit = norm_unit(self.unit) or "шт"
-        for name in ("ot", "em", "zpm", "mat", "tz", "nr_pct", "sp_pct"):
+        for name in ("ot", "em", "zpm", "mat", "tz", "nr_pct", "sp_pct", "done", "acted"):
             setattr(self, name, dec(getattr(self, name)))
         self.unit_factor = dec(self.unit_factor, ONE) or ONE
-        self.coef = dec(self.coef, ONE)
-        self.adj = dec(self.adj, ONE)
-        if self.unit_price is not None:
-            self.unit_price = dec(self.unit_price)
-        if self.unit_cost is not None:
-            self.unit_cost = dec(self.unit_cost)
+        for name in ("coef", "adj", "k_ot", "k_em", "k_mat"):
+            setattr(self, name, dec(getattr(self, name), ONE))
+        for name in ("unit_price", "unit_cost", "crew_price"):
+            value = getattr(self, name)
+            if value is not None and value != "":
+                setattr(self, name, dec(value))
+            else:
+                setattr(self, name, None)
 
     # ---------- money ----------
 
@@ -147,13 +159,15 @@ class Position:
 
     def costs(self, indices: Indices) -> PositionCosts:
         if not self.normative:
-            # a commercial price is a lump sum: no cost structure to report
-            return PositionCosts(other=money(self.qty * (self.unit_price or ZERO) * self.adj))
+            # a commercial price is a lump sum: no cost structure to report.
+            # Its coefficient is the one for labour (works) or for materials.
+            k = self.k_mat if self.kind == MATERIAL else self.k_ot
+            return PositionCosts(other=money(self.qty * (self.unit_price or ZERO) * self.adj * k))
         n = self.norm_qty
-        ot = self.ot * n * indices.ot * self.adj
-        em = self.em * n * indices.em * self.adj
-        zpm = self.zpm * n * indices.zpm_index() * self.adj
-        mat = self.mat * n * indices.mat * self.adj
+        ot = self.ot * n * indices.ot * self.adj * self.k_ot
+        em = self.em * n * indices.em * self.adj * self.k_em
+        zpm = self.zpm * n * indices.zpm_index() * self.adj * self.k_em
+        mat = self.mat * n * indices.mat * self.adj * self.k_mat
         fot = ot + zpm
         return PositionCosts(
             ot=money(ot),
@@ -178,7 +192,8 @@ class Position:
 
     def unit_price_now(self, indices: Indices) -> Decimal:
         if self.unit_price is not None:
-            return money(self.unit_price * self.adj)
+            k = self.k_mat if self.kind == MATERIAL else self.k_ot
+            return money(self.unit_price * self.adj * k)
         if not self.qty:
             return ZERO
         return money(self.total(indices) / self.qty)
@@ -198,6 +213,39 @@ class Position:
 
     def copy(self) -> "Position":
         return Position(**asdict(self))
+
+    # ---------- coefficients ----------
+
+    @property
+    def has_coefficients(self) -> bool:
+        return (self.k_ot, self.k_em, self.k_mat) != (ONE, ONE, ONE)
+
+    def apply_coefficient(self, name: str, k_ot=ONE, k_em=ONE, k_mat=ONE, basis: str = "") -> None:
+        """Multiply element coefficients and record the basis for the 'Обоснование' column."""
+        k_ot, k_em, k_mat = dec(k_ot, ONE), dec(k_em, ONE), dec(k_mat, ONE)
+        self.k_ot *= k_ot
+        self.k_em *= k_em
+        self.k_mat *= k_mat
+        parts = [f"{label} {value:g}" for label, value in (("ОТ", k_ot), ("ЭМ", k_em), ("МАТ", k_mat)) if value != ONE]
+        note = f"{name}: К " + ", ".join(parts) if parts else name
+        if basis:
+            note += f" ({basis})"
+        self.k_basis = f"{self.k_basis}; {note}" if self.k_basis else note
+
+    def clear_coefficients(self) -> None:
+        self.k_ot = self.k_em = self.k_mat = ONE
+        self.k_basis = ""
+
+    # ---------- progress ----------
+
+    @property
+    def remaining(self) -> Decimal:
+        return max(self.qty - self.done, ZERO)
+
+    @property
+    def to_act(self) -> Decimal:
+        """Done but not yet closed by a KS-2 act."""
+        return max(self.done - self.acted, ZERO)
 
     # ---------- serialisation ----------
 
@@ -266,15 +314,25 @@ class Totals:
     tz: Decimal = ZERO
     by_kind: dict[str, Decimal] = field(default_factory=dict)
     vat_pct: Decimal = ZERO
+    limited: list[tuple[str, Decimal, Decimal]] = field(default_factory=list)  # (название, %, сумма)
 
     @property
     def direct(self) -> Decimal:
         return money(self.ot + self.em + self.mat + self.other)
 
     @property
-    def subtotal(self) -> Decimal:
-        """Итого без НДС."""
+    def smr(self) -> Decimal:
+        """Итого по позициям: прямые затраты + НР + СП."""
         return money(self.direct + self.nr + self.sp)
+
+    @property
+    def limited_total(self) -> Decimal:
+        return money(sum((amount for _, _, amount in self.limited), ZERO))
+
+    @property
+    def subtotal(self) -> Decimal:
+        """Итого без НДС: позиции + лимитированные затраты."""
+        return money(self.smr + self.limited_total)
 
     @property
     def vat(self) -> Decimal:
@@ -300,6 +358,16 @@ class Estimate:
     basis: str = ""   # «ФЕР / ФСНБ-2022» или «договорные цены»
     # Накладные расходы считать частью себестоимости (ООО с офисом) или нет (бригада).
     floor_with_nr: bool = True
+    contract: str = ""                                          # «№ 14 от 01.10.2026»
+    limited: list[dict] = field(default_factory=list)          # {"name", "pct", "basis"}
+    status: str = "draft"
+    status_log: list[dict] = field(default_factory=list)       # {"status", "at", "note"}
+    sent_at: str = ""
+    payments: list[dict] = field(default_factory=list)         # {"date", "amount", "note"}
+    schedule: list[dict] = field(default_factory=list)         # {"name", "pct", "due"}
+    acts: list[dict] = field(default_factory=list)             # закрытые КС-2
+    kp: dict = field(default_factory=dict)                     # условия коммерческого предложения
+    crew: str = ""                                              # бригада / бригадир для наряда
 
     def __post_init__(self) -> None:
         self.vat_pct = dec(self.vat_pct)
@@ -347,7 +415,19 @@ class Estimate:
             out.sp += costs.sp
             out.tz += costs.tz
             out.by_kind[position.kind] = out.by_kind.get(position.kind, ZERO) + costs.total
+        smr = out.smr
+        for item in self.limited:
+            rate = dec(item.get("pct"))
+            out.limited.append((str(item.get("name", "")), rate, money(smr * pct(rate))))
         return out
+
+    def scale(self) -> Decimal:
+        """Grand total per ruble of positions - spreads limited costs and VAT over parts."""
+        totals = self.totals()
+        return totals.total / totals.smr if totals.smr else ONE
+
+    def copy(self) -> "Estimate":
+        return Estimate.from_dict(self.to_dict())
 
     def total(self) -> Decimal:
         return self.totals().total
@@ -376,12 +456,22 @@ class Estimate:
         self.history.append(label or f"{sign}{abs(delta)}% ({where}, позиций: {touched})")
         return self.total()
 
+    def _grand(self, smr: Decimal) -> Decimal:
+        """Grand total for a given sum of positions - the same rounding as totals()."""
+        limited = sum((money(smr * pct(dec(item.get("pct")))) for item in self.limited), ZERO)
+        subtotal = money(smr + limited)
+        return money(subtotal + money(subtotal * pct(self.vat_pct)))
+
     def fit_to(self, target) -> Decimal:
-        """Scale every position so that the grand total equals `target` (contract haggling)."""
+        """Scale every position so that the grand total equals `target` (contract haggling).
+
+        Limited costs and VAT are rounded separately, so with them some kopeck values are
+        unreachable; then the closest reachable total is used (never more than 1 kopeck off).
+        """
         goal = money(target)
         if goal <= ZERO:
             raise ValueError("целевая сумма должна быть больше нуля")
-        for _ in range(3):
+        for _ in range(4):
             current = self.total()
             if current == goal:
                 break
@@ -390,8 +480,29 @@ class Estimate:
             factor = goal / current
             for position in self.positions:
                 position.adj *= factor
+        if self.total() != goal:
+            self._fine_tune(goal)
         self.history.append(f"подгон под итог {goal}")
         return self.total()
+
+    def _fine_tune(self, goal: Decimal) -> None:
+        smr = self.totals().smr
+        candidates = [smr + Decimal(step) / 100 for step in range(-300, 301)]
+        best = min(candidates, key=lambda value: (abs(self._grand(value) - goal), abs(value - smr)))
+        delta = best - smr
+        priced = [p for p in self.positions if p.total(self.indices) > ZERO]
+        if not delta or not priced:
+            return
+        # the commercial position rounds in one step; fall back to the biggest one
+        biggest = max(priced, key=lambda p: (not p.normative, p.total(self.indices)))
+        want = biggest.total(self.indices) + delta
+        for _ in range(40):
+            now = biggest.total(self.indices)
+            if now == want or now <= ZERO:
+                break
+            biggest.adj *= want / now
+            if biggest.total(self.indices) == now:          # застряли на округлении - микрошаг
+                biggest.adj *= ONE + (Decimal("1e-9") if want > now else Decimal("-1e-9"))
 
     def reset_adjustments(self) -> Decimal:
         for position in self.positions:
@@ -449,6 +560,16 @@ class Estimate:
             "history": list(self.history),
             "basis": self.basis,
             "floor_with_nr": self.floor_with_nr,
+            "contract": self.contract,
+            "limited": [{k: (str(v) if isinstance(v, Decimal) else v) for k, v in item.items()} for item in self.limited],
+            "status": self.status,
+            "status_log": list(self.status_log),
+            "sent_at": self.sent_at,
+            "payments": [{k: (str(v) if isinstance(v, Decimal) else v) for k, v in item.items()} for item in self.payments],
+            "schedule": [{k: (str(v) if isinstance(v, Decimal) else v) for k, v in item.items()} for item in self.schedule],
+            "acts": list(self.acts),
+            "kp": dict(self.kp),
+            "crew": self.crew,
         }
 
     @classmethod
@@ -475,4 +596,14 @@ class Estimate:
             history=list(data.get("history") or []),
             basis=data.get("basis", ""),
             floor_with_nr=bool(data.get("floor_with_nr", True)),
+            contract=data.get("contract", ""),
+            limited=list(data.get("limited") or []),
+            status=data.get("status", "draft"),
+            status_log=list(data.get("status_log") or []),
+            sent_at=data.get("sent_at", ""),
+            payments=list(data.get("payments") or []),
+            schedule=list(data.get("schedule") or []),
+            acts=list(data.get("acts") or []),
+            kp=dict(data.get("kp") or {}),
+            crew=data.get("crew", ""),
         )
