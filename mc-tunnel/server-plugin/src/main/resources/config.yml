@@ -1,0 +1,6 @@
+# Private plugin channel. MUST match the client's --channel flag exactly.
+# Keep it a plausible namespaced key so it blends in with real mod channels.
+channel: "mctunnel:d"
+
+# How long to wait when dialing an outbound destination, in milliseconds.
+dial-timeout-ms: 10000

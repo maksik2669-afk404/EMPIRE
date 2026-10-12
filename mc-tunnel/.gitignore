@@ -1,0 +1,7 @@
+# Go build output
+/mctun-client
+/bin/
+*.test
+
+# Maven build output
+server-plugin/target/
