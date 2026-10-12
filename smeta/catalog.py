@@ -14,39 +14,11 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 
+from .headers import match_columns, sbornik_work_type
 from .money import ONE, ZERO, dec
 from .units import parse_unit
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "rates"
-
-# Columns we accept in an imported CSV. Keys are canonical, values are spellings seen in
-# exports from Grand-Smeta / Smeta.ru / FGIS CS and in hand-made files.
-_COLUMNS: dict[str, tuple[str, ...]] = {
-    "code": ("code", "шифр", "код", "обоснование", "номер расценки"),
-    "name": ("name", "наименование", "наименование работ", "работа", "описание"),
-    "unit": ("unit", "ед.изм.", "ед. изм.", "единица измерения", "ед", "измеритель"),
-    "ot": ("ot", "от", "оплата труда", "зп", "зпр", "оплата труда рабочих"),
-    "em": ("em", "эм", "эксплуатация машин", "машины"),
-    "zpm": ("zpm", "зпм", "в т.ч. зпм", "оплата труда машинистов"),
-    "mat": ("mat", "мат", "материалы", "мр"),
-    "tz": ("tz", "тз", "затраты труда", "чел.-ч", "трудозатраты"),
-    "work_type": ("work_type", "вид работ", "тип работ", "нр/сп", "раздел"),
-    "source": ("source", "источник", "сборник"),
-    "keywords": ("keywords", "ключевые слова", "синонимы"),
-}
-
-
-def _canon_columns(fieldnames: list[str]) -> dict[str, str]:
-    """Map a CSV header to canonical keys."""
-    out: dict[str, str] = {}
-    for raw in fieldnames or []:
-        key = (raw or "").strip().lower().lstrip("﻿")
-        for canon, spellings in _COLUMNS.items():
-            if key in spellings:
-                out[canon] = raw
-                break
-    return out
-
 
 _STOP = {
     "и", "в", "во", "на", "с", "со", "по", "из", "за", "до", "для", "от", "под", "над",
@@ -181,10 +153,15 @@ class Catalog:
         for path in sorted(base.glob("*.csv")):
             if path.name == "nr_sp.csv":
                 cat.nr_sp.update(parse_nr_sp_csv(path.read_text(encoding="utf-8")))
-            elif path.name == "indices.csv":
+            elif path.name.startswith("indices") or "индекс" in path.name.lower():
                 cat.indices.update(parse_indices_csv(path.read_text(encoding="utf-8")))
+            elif path.name == "sbornik_work_type.csv":
+                continue                      # таблица соответствия сборник → вид работ
             else:
-                cat.rates.extend(parse_rates_csv(path.read_text(encoding="utf-8"), source=path.stem))
+                try:
+                    cat.rates.extend(parse_rates_csv(path.read_text(encoding="utf-8"), source=path.stem))
+                except ValueError:
+                    continue                  # не таблица расценок - пропускаем молча
         return cat
 
     def extend(self, other: "Catalog") -> "Catalog":
@@ -284,7 +261,9 @@ def _reader(text: str):
 
 def parse_rates_csv(text: str, *, source: str = "") -> list[Rate]:
     reader = _reader(text)
-    columns = _canon_columns(reader.fieldnames or [])
+    fieldnames = list(reader.fieldnames or [])
+    columns = {key: fieldnames[index] for key, index in match_columns(fieldnames).items()
+               if index < len(fieldnames)}
     if "name" not in columns:
         raise ValueError("в файле нет столбца с наименованием работ")
     out: list[Rate] = []
@@ -306,7 +285,7 @@ def parse_rates_csv(text: str, *, source: str = "") -> list[Rate]:
                 zpm=dec(cell("zpm")),
                 mat=dec(cell("mat")),
                 tz=dec(cell("tz")),
-                work_type=(cell("work_type") or "прочие").lower(),
+                work_type=(cell("work_type") or sbornik_work_type(cell("code")) or "прочие").lower(),
                 source=cell("source") or source,
                 keywords=cell("keywords"),
             )

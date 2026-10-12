@@ -7,6 +7,7 @@ import os
 import re
 from dataclasses import dataclass
 from datetime import date
+from html import escape
 from io import BytesIO
 from pathlib import Path
 
@@ -24,14 +25,14 @@ from aiogram.types import (
     Message,
 )
 
-from . import render
+from . import importer, render, tax
 from .builder import build_from_text
 from .catalog import Catalog
 from .export_pdf import estimate_to_pdf
 from .export_xlsx import estimate_to_xlsx, margin_to_xlsx
 from .materials import OfferBook
 from .model import Company, Estimate, MATERIAL, inn_is_valid
-from .money import ZERO, dec, rub
+from .money import ZERO, dec, money, rub
 from .profit import build_report
 from .store import Store
 
@@ -477,6 +478,31 @@ async def cmd_import(message: Message, deps: Deps) -> None:
     await message.answer("\n".join(lines))
 
 
+@router.message(Command("base"))
+async def cmd_base(message: Message, command: CommandObject, deps: Deps) -> None:
+    tg_id = message.from_user.id
+    own = sum(row["rows"] for row in deps.store.imports(tg_id, "rates"))
+    argument = (command.args or "").strip().lower()
+    if argument in {"мои", "моя", "своя", "own"}:
+        deps.store.update_settings(tg_id, use_demo_rates=False)
+    elif argument in {"оба", "все", "both", "демо", "demo"}:
+        deps.store.update_settings(tg_id, use_demo_rates=True)
+    elif argument:
+        await message.answer("Варианты: <code>/base мои</code> или <code>/base оба</code>")
+        return
+    settings = deps.store.settings(tg_id)
+    catalog = deps.store.catalog(tg_id, deps.catalog)
+    lines = [
+        "<b>Справочник расценок</b>",
+        f"Загружено своих расценок: {own}",
+        f"Демо-расценки: {'включены' if settings['use_demo_rates'] else 'отключены'}",
+        f"Всего доступно: {len(catalog.rates)}",
+        "",
+        "<code>/base мои</code> — только своя база, <code>/base оба</code> — вместе с демо",
+    ]
+    await message.answer("\n".join(lines))
+
+
 @router.message(Command("import_clear"))
 async def cmd_import_clear(message: Message, deps: Deps) -> None:
     tg_id = message.from_user.id
@@ -488,45 +514,172 @@ async def cmd_import_clear(message: Message, deps: Deps) -> None:
 async def got_document(message: Message, deps: Deps, bot: Bot) -> None:
     document = message.document
     name = document.file_name or "import.csv"
-    if not name.lower().endswith((".csv", ".txt")):
-        await message.answer("Нужен CSV (.csv или .txt), разделитель «;».")
+    if not name.lower().endswith((".csv", ".txt", ".xlsx", ".xlsm", ".xml", ".dbf", ".zip")):
+        await message.answer(
+            "Поддерживаю CSV, XLSX, XML, DBF и ZIP с ними. Это прайс, расценки ФЕР или индексы?"
+        )
         return
-    if (document.file_size or 0) > 5 * 1024 * 1024:
-        await message.answer("Файл больше 5 МБ — разбейте на части.")
+    if (document.file_size or 0) > 20 * 1024 * 1024:
+        await message.answer(
+            "Телеграм отдаёт ботам файлы до 20 МБ, а полная ФСНБ больше. "
+            "Загрузите её на сервере одной командой:\n"
+            "<code>python3 -m smeta.fgis load /путь/ФСНБ-2022.zip --kind rates</code>"
+        )
         return
     buffer = BytesIO()
     await bot.download(document, destination=buffer)
     raw = buffer.getvalue()
-    for encoding in ("utf-8-sig", "utf-8", "cp1251"):
-        try:
-            text = raw.decode(encoding)
-            break
-        except UnicodeDecodeError:
-            continue
-    else:
-        await message.answer("Не смог прочитать файл: сохраните его в UTF-8 или Windows-1251.")
+    await message.answer("Читаю файл…")
+    kind, body, report = _run_import(raw, name)
+    if not body:
+        await message.answer(f"<pre>{escape(report)}</pre>")
         return
+    tg_id = message.from_user.id
+    first_rates = kind == "rates" and not deps.store.imports(tg_id, "rates")
+    deps.store.add_import(tg_id, kind, name, body, _import_count(kind, body))
+    await message.answer(f"<pre>{escape(report)}</pre>")
+    if kind == "rates":
+        if first_rates and deps.store.settings(tg_id)["use_demo_rates"]:
+            deps.store.update_settings(tg_id, use_demo_rates=False)
+            await message.answer(
+                "Считаю теперь только по вашей базе — демо-расценки отключил, "
+                "чтобы они не попали в смету. Вернуть их: <code>/base оба</code>"
+            )
+        await message.answer("Проверьте поиск: <code>/rates штукатурка</code>")
+    elif kind == "indices":
+        await message.answer("Индексы загружены. Выберите нужный: /index")
+    else:
+        await message.answer("Прайс загружен — материалы будут считаться по нему.")
 
-    kind, count = _detect_import(text)
-    if not count:
+
+def _import_count(kind: str, body: str) -> int:
+    return max(len(body.strip().splitlines()) - 1, 0)
+
+
+def _run_import(raw: bytes, name: str) -> tuple[str, str, str]:
+    """Decide what the file is, convert it to canonical CSV and report what happened."""
+    head = raw[:4096].decode("utf-8", "replace").lower()
+    if any(word in head for word in ("скидка", "discount", "поставщик", "supplier", "розница", "retail")):
+        book = OfferBook.from_csv(raw.decode("utf-8-sig", "replace"))
+        if book.offers:
+            return "offers", raw.decode("utf-8-sig", "replace"), (
+                f"Загрузил {len(book.offers)} строк прайса из «{name}»."
+            )
+    looks_like_indices = any(word in name.lower() for word in ("индекс", "index", "ксмр"))
+    if not looks_like_indices:
+        rates, report = importer.import_rates(raw, name)
+        if rates:
+            return "rates", importer.rates_to_csv(rates), report.as_text()
+    indices, index_report = importer.import_indices(raw, name)
+    if indices:
+        return "indices", importer.indices_to_csv(indices), index_report.as_text()
+    if looks_like_indices:
+        rates, report = importer.import_rates(raw, name)
+        if rates:
+            return "rates", importer.rates_to_csv(rates), report.as_text()
+    return "", "", (
+        "Не понял файл. Нужен один из вариантов:\n"
+        "• расценки: столбцы «Шифр», «Наименование», «Ед. изм.», «Оплата труда», «Эксплуатация машин», «Материалы»;\n"
+        "• индексы: «Субъект РФ», «ИОТ», «ИЭМ», «ИМАТ» или «Индекс СМР»;\n"
+        "• прайс: material;unit;price;discount;retail;supplier.\n"
+        + index_report.as_text()
+    )
+
+
+# ---------- индексы пересчёта ----------
+
+
+@router.message(Command("index"))
+async def cmd_index(message: Message, command: CommandObject, deps: Deps) -> None:
+    tg_id = message.from_user.id
+    catalog = deps.store.catalog(tg_id, deps.catalog)
+    names = list(catalog.indices)
+    if not names:
+        await message.answer("Индексов нет. Загрузите таблицу ФГИС ЦС файлом или командой /import.")
+        return
+    argument = (command.args or "").strip()
+    if not argument:
+        current = deps.store.settings(tg_id)["index_name"] or names[0]
+        lines = ["<b>Индексы пересчёта в текущие цены</b>"]
+        for number, name in enumerate(names[:40], 1):
+            index = catalog.indices[name]
+            mark = " ✅" if name == current else ""
+            lines.append(
+                f"{number}. {escape(name)}{mark}\n    ИОТ {index.ot} · ИЭМ {index.em} · ИМАТ {index.mat}"
+            )
+        lines.append("")
+        lines.append("Выбрать: <code>/index 2</code> или <code>/index Москва</code>")
+        await message.answer("\n".join(lines))
+        return
+    chosen = ""
+    if argument.isdigit() and 1 <= int(argument) <= len(names):
+        chosen = names[int(argument) - 1]
+    else:
+        matches = [name for name in names if argument.lower() in name.lower()]
+        if len(matches) == 1:
+            chosen = matches[0]
+        elif matches:
+            await message.answer("Подходит несколько — уточните номером:\n" + "\n".join(
+                f"{names.index(name) + 1}. {escape(name)}" for name in matches[:10]))
+            return
+    if not chosen:
+        await message.answer("Не нашёл такой индекс. /index — список.")
+        return
+    deps.store.update_settings(tg_id, index_name=chosen)
+    found = _current(deps, tg_id)
+    if found:
+        estimate_id, estimate = found
+        estimate.indices = catalog.indices[chosen]
+        _save(deps, tg_id, estimate_id, estimate)
+        await message.answer(f"Индекс «{escape(chosen)}» применён.")
+        await message.answer(render.estimate_text(estimate), reply_markup=keyboard())
+        return
+    await message.answer(f"Индекс «{escape(chosen)}» выбран — применю к новым сметам.")
+
+
+# ---------- налоги ----------
+
+
+@router.message(Command("nalog", "налог", "tax"))
+async def cmd_nalog(message: Message, command: CommandObject, deps: Deps) -> None:
+    tg_id = message.from_user.id
+    found = _current(deps, tg_id)
+    if not found:
         await message.answer(
-            "Не нашёл в файле ни расценок, ни строк прайса. Проверьте заголовок столбцов — /import."
+            "Сметы нет. Можно посчитать налоги и без неё: <code>/nalog 1200000 материалы 400000 фот 300000</code>"
         )
         return
-    deps.store.add_import(message.from_user.id, kind, name, text, count)
-    what = "расценок" if kind == "rates" else "строк прайса"
-    await message.answer(f"Загрузил {count} {what} из «{name}». Теперь они используются первыми.")
+    estimate = found[1]
+    words = (command.args or "").lower().split()
+    annual = next((dec(word) for word in words if word.replace(".", "").isdigit()), None)
+    is_ip = any(word in {"ип", "ip"} for word in words)
+    no_staff = any(word in {"без", "безработников", "один", "сам"} for word in words)
+
+    totals = estimate.totals()
+    report = build_report(estimate, deps.store.offers(tg_id, deps.offers))
+    materials_cost = money(sum((row.cost or ZERO) for row in report.materials))
+    payroll = money(totals.ot + totals.zpm)
+    other = money(max(report.cost_total - materials_cost - payroll, ZERO))
+    inputs = tax.Money(
+        revenue=estimate.total(),
+        vat_in_revenue=totals.vat,
+        materials=materials_cost,
+        payroll=payroll,
+        other_costs=other,
+        employees=not no_staff,
+        ip=is_ip,
+        annual_revenue=annual,
+    )
+    text = tax.compare_text(inputs)
+    if annual is None:
+        text += ("\nГодовой доход не задан — считаю по этой смете. "
+                 "Точнее: <code>/nalog 18000000</code>, для ИП добавьте «ип».")
+    await message.answer(f"<pre>{escape(text)}</pre>")
 
 
-def _detect_import(text: str) -> tuple[str, int]:
-    """Guess whether a CSV is a rate catalog or a supplier price list."""
-    head = "\n".join(text.splitlines()[:6]).lower()
-    if any(word in head for word in ("скидка", "discount", "поставщик", "supplier", "розница", "retail")):
-        return "offers", len(OfferBook.from_csv(text).offers)
-    try:
-        return "rates", len(Catalog.from_csv(text).rates)
-    except ValueError:
-        return "offers", len(OfferBook.from_csv(text).offers)
+@router.message(Command("nalog_rates", "ставки"))
+async def cmd_nalog_rates(message: Message) -> None:
+    await message.answer(f"<pre>{escape(tax.TaxRates.load().as_text())}</pre>")
 
 
 # ---------- files ----------

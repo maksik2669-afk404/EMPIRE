@@ -1,5 +1,6 @@
 """Bot flow against a fake Telegram session: шапка -> работы -> рез -> файлы -> профит."""
 import datetime
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -7,8 +8,8 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.base import BaseSession
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.methods import SendDocument, SendMessage
-from aiogram.types import CallbackQuery, Chat, Message, Update, User
+from aiogram.methods import GetFile, SendDocument, SendMessage
+from aiogram.types import CallbackQuery, Chat, Document, File, Message, Update, User
 
 from smeta.bot import Deps, router
 from smeta.catalog import Catalog
@@ -23,9 +24,13 @@ class FakeSession(BaseSession):
     def __init__(self):
         super().__init__()
         self.sent: list = []
+        self.file_bytes = b""
 
     async def make_request(self, bot, method, timeout=None):
         self.sent.append(method)
+        if isinstance(method, GetFile):
+            return File(file_id="f1", file_unique_id="u1", file_path="docs/file.bin",
+                        file_size=len(self.file_bytes))
         if isinstance(method, SendMessage):
             return Message(message_id=len(self.sent), date=datetime.datetime.now(), chat=CHAT,
                            text=method.text).as_(bot)
@@ -33,8 +38,8 @@ class FakeSession(BaseSession):
             return True
         return Message(message_id=len(self.sent), date=datetime.datetime.now(), chat=CHAT, text="ok").as_(bot)
 
-    async def stream_content(self, *args, **kwargs):  # pragma: no cover
-        yield b""
+    async def stream_content(self, *args, **kwargs):
+        yield self.file_bytes
 
     async def close(self):
         pass
@@ -58,6 +63,15 @@ def message(bot: Bot, text: str, mid: int) -> Update:
     return Update.model_validate(
         {"update_id": mid, "message": Message(message_id=mid, date=datetime.datetime.now(), chat=CHAT,
                                               from_user=USER, text=text).model_dump()},
+        context={"bot": bot},
+    )
+
+
+def document_message(bot: Bot, name: str, size: int, mid: int) -> Update:
+    document = Document(file_id="f1", file_unique_id="u1", file_name=name, file_size=size)
+    return Update.model_validate(
+        {"update_id": mid, "message": Message(message_id=mid, date=datetime.datetime.now(), chat=CHAT,
+                                              from_user=USER, document=document).model_dump()},
         context={"bot": bot},
     )
 
@@ -183,5 +197,68 @@ async def test_text_without_estimate_creates_one(tmp_path: Path, dispatcher: Dis
     estimate = deps.store.load_estimate(USER.id, settings["current_id"])
     assert estimate.positions[0].code == "ДЕМО-03.06"
     assert estimate.number.startswith("СМ-")
+    deps.store.close()
+    await bot.session.close()
+
+
+async def test_import_index_and_tax(tmp_path: Path, dispatcher: Dispatcher):
+    """Загрузка ФСНБ-фрагмента и таблицы индексов файлом, выбор индекса, расчёт налогов."""
+    from tests.test_smeta_import import fsnb_xlsx, indices_xlsx
+
+    session = FakeSession()
+    bot = Bot("42:TEST", session=session, default=DefaultBotProperties(parse_mode="HTML"))
+    deps = Deps(store=Store(tmp_path / "s.db"), catalog=Catalog.load(),
+                offers=OfferBook.load("data/suppliers/demo.csv"), export_dir=tmp_path / "e")
+    mid = [0]
+
+    async def feed(update: Update) -> None:
+        await dispatcher.feed_update(bot, update, deps=deps)
+
+    async def say(text: str) -> None:
+        mid[0] += 1
+        await feed(message(bot, text, mid[0]))
+
+    async def upload(path: Path) -> None:
+        session.file_bytes = path.read_bytes()
+        mid[0] += 1
+        await feed(document_message(bot, path.name, len(session.file_bytes), mid[0]))
+
+    # расценки ФСНБ приходят файлом XLSX с двухуровневой шапкой
+    await upload(fsnb_xlsx(tmp_path / "ФСНБ-2022_сборник15.xlsx"))
+    assert "Импорт расценок: 3" in session.texts()
+    assert deps.store.imports(USER.id, "rates")
+
+    # и сразу используются в смете
+    await say("штукатурка стен 120 м2")
+    settings = deps.store.settings(USER.id)
+    estimate = deps.store.load_estimate(USER.id, settings["current_id"])
+    assert estimate.positions[0].code == "ФЕР15-02-016-03"
+
+    # индексы пересчёта: загрузка, список, выбор
+    await upload(indices_xlsx(tmp_path / "индексы_IV_кв_2026.xlsx"))
+    assert "Импорт индексов: 2" in session.texts()
+    await say("/index")
+    assert "ИОТ 1.42" in session.texts()
+    await say("/index Московская")               # совпадает и демо-пример, и импорт
+    assert "уточните номером" in session.texts()
+    before = deps.store.load_estimate(USER.id, settings["current_id"]).total()
+    await say("/index Московская область")
+    estimate = deps.store.load_estimate(USER.id, settings["current_id"])
+    assert estimate.indices.ot == Decimal("1.38")
+    assert estimate.total() > before            # пересчёт в текущие цены поднял итог
+    assert deps.store.settings(USER.id)["index_name"].startswith("Московская область")
+
+    # налоги по смете
+    await say("/nalog 18000000")
+    text = session.texts()
+    assert "Выгоднее всего" in text and "УСН" in text
+    await say("/nalog_rates")
+    assert "Ставки налогов" in session.texts()
+
+    # слишком большой файл не качаем, а подсказываем серверную команду
+    mid[0] += 1
+    await feed(document_message(bot, "ФСНБ-2022.zip", 40 * 1024 * 1024, mid[0]))
+    assert "python3 -m smeta.fgis load" in session.texts()
+
     deps.store.close()
     await bot.session.close()

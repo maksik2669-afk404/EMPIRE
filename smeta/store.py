@@ -7,7 +7,7 @@ from dataclasses import asdict
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from .catalog import Catalog, parse_rates_csv
+from .catalog import Catalog, parse_indices_csv, parse_rates_csv
 from .materials import OfferBook
 from .model import Company, Estimate
 from .money import dec
@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS users (
     vat_pct TEXT NOT NULL DEFAULT '20',
     index_name TEXT NOT NULL DEFAULT '',
     floor_with_nr INTEGER NOT NULL DEFAULT 1,
+    use_demo_rates INTEGER NOT NULL DEFAULT 1,
     counter INTEGER NOT NULL DEFAULT 0,
     current_id INTEGER,
     created_at TEXT NOT NULL
@@ -57,7 +58,15 @@ class Store:
         self.conn = sqlite3.connect(self.path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        self._migrate()
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        """Add columns that newer versions expect to databases created by older ones."""
+        existing = {row["name"] for row in self.conn.execute("PRAGMA table_info(users)")}
+        for column, ddl in (("use_demo_rates", "INTEGER NOT NULL DEFAULT 1"),):
+            if column not in existing:
+                self.conn.execute(f"ALTER TABLE users ADD COLUMN {column} {ddl}")
 
     def close(self) -> None:
         self.conn.close()
@@ -93,17 +102,19 @@ class Store:
             "vat_pct": dec(row["vat_pct"]),
             "index_name": row["index_name"],
             "floor_with_nr": bool(row["floor_with_nr"]),
+            "use_demo_rates": bool(row["use_demo_rates"]),
             "current_id": row["current_id"],
         }
 
     def update_settings(self, tg_id: int, **fields) -> None:
         self.user(tg_id)
-        allowed = {"vat_pct", "index_name", "floor_with_nr", "current_id"}
+        allowed = {"vat_pct", "index_name", "floor_with_nr", "use_demo_rates", "current_id"}
         pairs = {k: v for k, v in fields.items() if k in allowed}
         if not pairs:
             return
+        flags = {"floor_with_nr", "use_demo_rates"}
         sets = ", ".join(f"{k} = ?" for k in pairs)
-        values = [str(v) if k == "vat_pct" else (int(v) if k == "floor_with_nr" else v) for k, v in pairs.items()]
+        values = [str(v) if k == "vat_pct" else (int(v) if k in flags else v) for k, v in pairs.items()]
         self.conn.execute(f"UPDATE users SET {sets} WHERE tg_id = ?", (*values, tg_id))
         self.conn.commit()
 
@@ -173,7 +184,11 @@ class Store:
         return cursor.rowcount
 
     def catalog(self, tg_id: int, base: Catalog) -> Catalog:
-        """Base (demo or official) catalog plus everything this user imported. User rates win."""
+        """Imported rates first; the shipped demo catalog only while `use_demo_rates` is on.
+
+        Mixing an official FSNB import with demo prices would silently put made-up numbers
+        into a real estimate, so importing turns the demo base off (see /base in the bot).
+        """
         merged = Catalog(rates=[], nr_sp=dict(base.nr_sp), indices=dict(base.indices))
         for row in self.conn.execute(
             "SELECT body FROM imports WHERE tg_id = ? AND kind = 'rates' ORDER BY id", (tg_id,)
@@ -182,7 +197,16 @@ class Store:
                 merged.rates.extend(parse_rates_csv(row["body"]))
             except ValueError:
                 continue
-        merged.extend(Catalog(rates=list(base.rates)))
+        own = len(merged.rates)
+        for row in self.conn.execute(
+            "SELECT body FROM imports WHERE tg_id = ? AND kind = 'indices' ORDER BY id", (tg_id,)
+        ):
+            try:
+                merged.indices.update(parse_indices_csv(row["body"]))
+            except (ValueError, KeyError):
+                continue
+        if not own or self.settings(tg_id)["use_demo_rates"]:
+            merged.extend(Catalog(rates=list(base.rates)))
         return merged
 
     def offers(self, tg_id: int, base: OfferBook | None = None) -> OfferBook:
