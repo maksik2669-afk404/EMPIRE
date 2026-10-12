@@ -110,6 +110,9 @@ mvn package                   # -> target/McTunnel.jar
 ## Дорожная карта
 
 - [x] milestone 1 — ядро транспорта (mcproto, mux, shape, mctun), тесты.
+- [x] live end-to-end (offline-mode) проверен: клиент из РФ → Paper 1.20.1 в
+      Германии → выход в интернет под IP сервера. SOCKS5 → mux → custom-payload
+      → плагин → сеть работает сквозняком.
 - [~] milestone 2 — online-mode. Сделано: крипто-handshake (RSA-обмен ключами,
       Minecraft server-hash на эталонных векторах, AES/CFB8), `mctun.LoginOnline`,
       интеграционный тест клиент↔фейковый сервер (пакет `mcauth`). Осталось:
