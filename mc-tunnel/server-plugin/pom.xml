@@ -34,5 +34,18 @@
 
     <build>
         <finalName>McTunnel</finalName>
+        <plugins>
+            <!-- Pin a modern compiler plugin; the lifecycle default (3.1)
+                 ignores <release> and falls back to source/target 5, which
+                 recent JDKs reject. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+                <configuration>
+                    <release>17</release>
+                </configuration>
+            </plugin>
+        </plugins>
     </build>
 </project>
