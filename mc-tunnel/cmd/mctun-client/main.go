@@ -47,6 +47,10 @@ func main() {
 		log.Fatalf("bad server port: %v", err)
 	}
 
+	log.Printf("mctun-client build v4 | play IDs: custom_payload in=0x%02x out=0x%02x, keep_alive in=0x%02x out=0x%02x",
+		mctun.PlayCustomPayloadClientbound, mctun.PlayCustomPayloadServerbound,
+		mctun.PlayKeepAliveClientbound, mctun.PlayKeepAliveServerbound)
+
 	session, err := dialServer(host, uint16(port64), *user, *channel, *rateKB, *minChunk, *maxChunk)
 	if err != nil {
 		log.Fatalf("connect to cover server: %v", err)
