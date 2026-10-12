@@ -110,8 +110,11 @@ mvn package                   # -> target/McTunnel.jar
 ## Дорожная карта
 
 - [x] milestone 1 — ядро транспорта (mcproto, mux, shape, mctun), тесты.
-- [ ] milestone 2 — online-mode: Mojang/`authlib` аутентификация + шифрование
-      на живом сервере; интеграционный прогон клиент↔плагин на Paper.
+- [~] milestone 2 — online-mode. Сделано: крипто-handshake (RSA-обмен ключами,
+      Minecraft server-hash на эталонных векторах, AES/CFB8), `mctun.LoginOnline`,
+      интеграционный тест клиент↔фейковый сервер (пакет `mcauth`). Осталось:
+      Microsoft device-code авторизация (пакет `auth`) и проводка `--online` в
+      клиент; живой прогон на Paper.
 - [ ] milestone 3 — реалистичный временной шейпинг под профиль геймплея;
       cover-трафик в простое.
 - [ ] milestone 4 — pre-shared ключ и аутентификация туннеля внутри канала
