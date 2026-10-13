@@ -620,8 +620,9 @@ def refs_screen(ctx: Ctx) -> tuple[str, Markup]:
              f"Своих расценок: {own} · индексов: {indices} · строк прайса: {offers}",
              f"Демо-расценки: {'включены' if settings['use_demo_rates'] else 'отключены'} · всего доступно: {len(catalog.rates)}",
              f"Индекс: {escape(settings['index_name'] or 'текущие цены')}",
-             "", "Загрузка: ФСНБ-2022 и индексы ФГИС ЦС (XLSX, XML, DBF, CSV, ZIP до 20 МБ) или прайс поставщика.",
-             "Больше 20 МБ — на сервере: <code>python3 -m smeta.fgis load файл</code>"]
+             "", "Загрузка: ФСНБ-2022 и индексы ФГИС ЦС (XLSX, XML, DBF, CSV, ZIP до 20 МБ) или прайс поставщика."]
+    if ctx.tg_id in billing.admins():                     # подсказка по большим файлам — только администратору
+        lines.append("Больше 20 МБ — на сервере: <code>python3 -m smeta.fgis load файл</code>")
     rows: Rows = [
         [("📥 Загрузить файл", "a:ask:import"), ("🔎 Найти расценку", "a:ask:rates_q")],
         [("📈 Индекс пересчёта", "go:idx:0"), ("🗂 Демо вкл/выкл", "a:base")],
@@ -652,7 +653,10 @@ def subscription_screen(ctx: Ctx) -> tuple[str, Markup]:
     for item in billing.plans():
         price = f"{item.price_rub} ₽" if token else f"{item.stars} ⭐"
         rows.append([(f"{item.title} — {price}", f"a:buy:{item.code}")])
-    lines.append("Подписка снимает лимит на количество смет. Оплата через Телеграм за минуту.")
+    lines.append("Подписка открывает готовые документы: смета, КП, наряд, КС-2/КС-3. "
+                 "Расчёт на экране — всегда бесплатно.")
+    if billing.tribute_pay_url(ctx.tg_id):
+        rows.append([("💳 Оплатить по СБП (Tribute)", "a:tribute")])
     rows.append([("🎟 Ввести промокод", "a:ask:promo")])
     if ctx.tg_id in billing.admins():
         stats = ctx.deps.store.billing_stats()

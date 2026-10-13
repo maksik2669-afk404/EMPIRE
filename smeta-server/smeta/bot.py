@@ -707,6 +707,14 @@ async def do_action(call: CallbackQuery, deps: Deps, state: FSMContext, bot: Bot
             return "⚠️ Тариф не найден", None
         await bot.send_invoice(chat_id=tg_id, **billing.invoice(item))
         return None, ""
+    if name == "tribute":
+        url = billing.tribute_pay_url(tg_id)
+        if not url:
+            return "⚠️ Оплата через Tribute не настроена.", None
+        await call.message.answer(
+            "💳 Оплата по СБП через Tribute.\nПосле оплаты подписка откроется автоматически.",
+            reply_markup=Markup(inline_keyboard=[[Button(text="Оплатить по СБП", url=url)]]))
+        return None, None
     if name == "tax_ip":
         deps.store.update_settings(tg_id, tax_ip=not deps.store.settings(tg_id)["tax_ip"])
         return None, None
@@ -1054,6 +1062,11 @@ async def send_document(message: Message, deps: Deps, kind: str, *, tg_id: int |
     if not found or not found[1].positions:
         await message.answer("В смете нет позиций.")
         return
+    allowed, reason = billing.can_export(deps.store, tg_id)
+    if not allowed:
+        await message.answer(reason, reply_markup=Markup(inline_keyboard=[
+            [Button(text="💳 Открыть подписку", callback_data="go:sub")]]))
+        return
     _, estimate = found
     deps.export_dir.mkdir(parents=True, exist_ok=True)
     stem = safe_name(f"{estimate.number or estimate.date.isoformat()}")
@@ -1091,6 +1104,11 @@ async def send_document(message: Message, deps: Deps, kind: str, *, tg_id: int |
 
 
 async def send_act(message: Message, deps: Deps, estimate: Estimate, act: dict) -> None:
+    allowed, reason = billing.can_export(deps.store, message.from_user.id)
+    if not allowed:
+        await message.answer(reason, reply_markup=Markup(inline_keyboard=[
+            [Button(text="💳 Открыть подписку", callback_data="go:sub")]]))
+        return
     deps.export_dir.mkdir(parents=True, exist_ok=True)
     stem = safe_name(f"{estimate.number}_акт{act['number']}")
     await send_file(message, docs.ks2_xlsx(estimate, act, deps.export_dir / f"КС-2_{stem}.xlsx"),
@@ -1121,9 +1139,13 @@ async def got_document(message: Message, deps: Deps, state: FSMContext, bot: Bot
     data = await state.get_data()
     waiting = (data.get("input") or {}).get("kind") if await state.get_state() == Flow.input.state else None
     if (document.file_size or 0) > 20 * 1024 * 1024:
-        await message.answer(
-            "Телеграм отдаёт ботам файлы до 20 МБ, а этот больше. Полную ФСНБ загрузите на сервере:\n"
-            "<code>python3 -m smeta.fgis load /путь/ФСНБ-2022.zip --kind rates</code>")
+        if message.from_user.id in billing.admins():
+            await message.answer(
+                "Телеграм отдаёт ботам файлы до 20 МБ, а этот больше. Полную ФСНБ загрузите на сервере:\n"
+                "<code>python3 -m smeta.fgis load /путь/ФСНБ-2022.zip --kind rates</code>")
+        else:
+            await message.answer("Файл больше 20 МБ — Телеграм не передаёт такие боту. "
+                                 "Пришлите файл поменьше или разбейте его на части.")
         return
     buffer = BytesIO()
     await bot.download(document, destination=buffer)
