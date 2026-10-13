@@ -105,39 +105,6 @@ def can_export(store: Store, tg_id: int) -> tuple[bool, str]:
                    "(смета, КП, наряд, КС-2/КС-3) открываются с подпиской.")
 
 
-def tribute_secret() -> str:
-    return os.getenv("SMETA_TRIBUTE_SECRET", "").strip()
-
-
-def tribute_enabled() -> bool:
-    return bool(tribute_secret())
-
-
-def tribute_pay_url(tg_id: int) -> str:
-    """Ссылка на оплату в Tribute. Поддерживает плейсхолдер {tg} — подставит Telegram id плательщика."""
-    url = os.getenv("SMETA_TRIBUTE_URL", "").strip()
-    return url.replace("{tg}", str(tg_id)) if url else ""
-
-
-def tribute_days(product: str, amount) -> int:
-    """Сколько дней подписки начислить за оплату Tribute.
-
-    SMETA_TRIBUTE_MAP='id_месяца:30,id_года:365' сопоставляет товар Tribute с днями;
-    иначе берётся SMETA_TRIBUTE_DAYS (по умолчанию 30).
-    """
-    mapping: dict[str, int] = {}
-    for chunk in os.getenv("SMETA_TRIBUTE_MAP", "").split(","):
-        key, _, days = chunk.partition(":")
-        if key.strip() and days.strip().isdigit():
-            mapping[key.strip()] = int(days)
-    if product and product in mapping:
-        return mapping[product]
-    try:
-        return int(os.getenv("SMETA_TRIBUTE_DAYS", "30"))
-    except ValueError:
-        return 30
-
-
 def invoice(plan_item: Plan) -> dict:
     """Arguments for Bot.send_invoice. RUB through the provider, or Telegram Stars without one."""
     from aiogram.types import LabeledPrice
