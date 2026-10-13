@@ -25,7 +25,7 @@ from aiogram.types import (
     WebAppInfo,
 )
 
-from . import billing, consumption, datafiles, funnel, obmer, progress, render, tax, templates
+from . import billing, consumption, datafiles, funnel, obmer, progress, render, speech, tax, templates
 from .context import Ctx
 from .docs import crew_rows
 from .model import MATERIAL, WORK, Estimate, inn_is_valid
@@ -43,6 +43,34 @@ def reply_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text=MENU_TEXT), KeyboardButton(text=ESTIMATE_TEXT)]],
         resize_keyboard=True, is_persistent=True, input_field_placeholder="Пишите работы: штукатурка стен 120 м2",
+    )
+
+
+def welcome_text() -> str:
+    """Подробное приветствие по /start — что умеет бот и с чего начать."""
+    voice = "\n🎤 <b>Голосом</b> — наговорите работы, я распознаю и посчитаю." if speech.enabled() else ""
+    return (
+        "👋 <b>Сметчик</b> — считаю строительные сметы за минуту.\n\n"
+        "Главное: просто <b>напишите работы текстом</b>, например:\n"
+        "<code>штукатурка стен 120 м2</code>\n"
+        "<code>стяжка 85 м2 по 700</code>\n"
+        "<code>мат: керамогранит 22 м2 1550</code>\n"
+        "— я подберу расценки ФЕР/ФСНБ-2022, добавлю НР и СП и пересчитаю в текущие цены."
+        + voice + "\n\n"
+        "<b>Что умею:</b>\n"
+        "🧮 <b>Новая смета</b> — из текста или голоса.\n"
+        "📐 <b>Обмер помещений</b> — введите размеры, объёмы посчитаю сам.\n"
+        "🏗 <b>Смета по шаблону</b> — ванная, квартира и другие по площади.\n"
+        "🔍 <b>Проверка чужой сметы</b> — пришлите XLSX/XML: найду ошибки в арифметике, "
+        "завышения цен и забытые работы.\n"
+        "🧾 <b>Налоги</b> — сравню УСН / ОСНО / НПД, НДС 22% (2026), покажу, сколько останется на руки.\n"
+        "💰 <b>Профит</b> — ваша маржа и выплата бригаде.\n"
+        "📄 <b>Документы</b> — смета, КП с логотипом, наряд-задание, акты КС-2/КС-3, допсоглашение.\n"
+        "📚 <b>Справочники</b> — загрузите свои расценки ФЕР и индексы ФГИС ЦС или прайс поставщика.\n"
+        "📊 <b>Воронка продаж</b> — статусы смет и напоминания заказчикам.\n"
+        "🎁 <b>Пригласить друга</b> — дни Pro в подарок вам обоим.\n\n"
+        "💳 <b>Бесплатно</b>: расчёт смет без ограничений. Готовые документы для заказчика — по подписке.\n\n"
+        "Начните прямо сейчас — напишите первую работу или нажмите «🧮 Новая смета»."
     )
 
 
@@ -100,7 +128,10 @@ def home(ctx: Ctx) -> tuple[str, Markup]:
         lines.append(f"▶️ Текущая: {escape(estimate.number)} · {rub(estimate.total())} ₽ · "
                      f"{funnel.TITLES.get(estimate.status, '')}")
         rows.append([(f"▶️ Продолжить {estimate.number}", "go:est")])
-    lines += ["", "Или просто напишите работы текстом — я добавлю их в текущую смету."]
+    hint = "Или просто напишите работы текстом"
+    if speech.enabled():
+        hint += " или наговорите голосовым"
+    lines += ["", hint + " — я добавлю их в текущую смету."]
     rows += [
         [("📐 Обмер помещений", "go:obm"), ("🏗 Смета по шаблону", "go:tpl")],
         [("🔍 Проверить чужую смету", "go:aud"), ("🧾 Налоги", "go:tax")],

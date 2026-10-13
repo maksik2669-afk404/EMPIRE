@@ -30,7 +30,7 @@ from aiogram.types import (
 )
 
 from . import (
-    billing, consumption, datafiles, docs, funnel, importer, obmer, progress, render, tax, templates, ui, webapp,
+    billing, consumption, datafiles, docs, funnel, importer, obmer, progress, render, speech, tax, templates, ui, webapp,
 )
 from .audit import audit, report_xlsx
 from .builder import build, build_from_text
@@ -129,7 +129,10 @@ async def cmd_start(message: Message, deps: Deps, state: FSMContext, command: Co
         ref_result = deps.store.register_referral(message.from_user.id, referrer_id, billing.ref_welcome_days())
     deps.store.user(message.from_user.id)
     await state.set_state(None)
-    await message.answer("👋 Сметчик на связи. Кнопка «🏠 Меню» внизу работает всегда.", reply_markup=ui.reply_keyboard())
+    if command.command == "start":
+        await message.answer(ui.welcome_text(), reply_markup=ui.reply_keyboard())
+    else:
+        await message.answer("🏠 Меню. Кнопки внизу работают всегда.", reply_markup=ui.reply_keyboard())
     if ref_result:
         await message.answer(
             f"🎁 Вы пришли по приглашению — вам <b>+{ref_result['welcome_days']} дней Pro</b>, все документы открыты. "
@@ -1123,6 +1126,31 @@ async def send_act(message: Message, deps: Deps, estimate: Estimate, act: dict) 
                     f"📝 КС-2 № {act['number']} — {rub(dec(act['total']))} ₽")
     await send_file(message, docs.ks3_xlsx(estimate, act, deps.export_dir / f"КС-3_{stem}.xlsx"),
                     f"📝 КС-3 № {act['number']}")
+
+
+@router.message(StateFilter(None), F.voice | F.audio)
+async def got_voice(message: Message, deps: Deps, state: FSMContext, bot: Bot) -> None:
+    if not speech.enabled():
+        await message.answer("🎤 Голосовой ввод пока не настроен. Напишите работы текстом: «штукатурка стен 120 м2».")
+        return
+    media = message.voice or message.audio
+    if (media.file_size or 0) > 20 * 1024 * 1024:
+        await message.answer("🎤 Запись слишком длинная (Телеграм отдаёт боту до 20 МБ). Запишите покороче.")
+        return
+    await message.answer("🎤 Распознаю…")
+    buffer = BytesIO()
+    await bot.download(media, destination=buffer)
+    try:
+        text = await speech.transcribe(buffer.getvalue())
+    except Exception:                                    # noqa: BLE001 — сеть/ключ/квота провайдера
+        log.exception("stt failed")
+        await message.answer("Не смог распознать запись. Попробуйте ещё раз или напишите работы текстом.")
+        return
+    if not text:
+        await message.answer("🎤 Ничего не расслышал. Запишите ещё раз, ближе к микрофону.")
+        return
+    await message.answer(f"🎤 Распознал: «{escape(text)}»\nДобавляю в смету…")
+    await finish_value(message, deps, state, "works", "", {"text": text})
 
 
 @router.message(F.photo)
