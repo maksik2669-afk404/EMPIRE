@@ -418,7 +418,7 @@ async def api_tax_target(request, deps: Deps, tg_id: int, body: dict) -> dict:
     regimes = (tax.USN6, tax.USN15, tax.OSNO_IP, tax.NPD) if base.ip else (tax.USN6, tax.USN15, tax.OSNO_OOO)
     out = []
     for regime in regimes:
-        vat = Decimal(20) if regime in (tax.OSNO_OOO, tax.OSNO_IP) else ZERO
+        vat = tax.current_vat() if regime in (tax.OSNO_OOO, tax.OSNO_IP) else ZERO
         revenue, result, _ = tax.price_for(target, regime, materials=base.materials, payroll=base.payroll,
                                            other_costs=base.other_costs, vat_pct=vat, employees=base.employees,
                                            ip=base.ip, annual_revenue=base.annual_revenue)

@@ -604,7 +604,7 @@ def company_screen(ctx: Ctx) -> tuple[str, Markup]:
     lines.append("🖼 Логотип загружен" if ctx.logo() else "🖼 Логотипа нет")
     rows: Rows = [
         [("✏️ Заполнить реквизиты", "a:ask:company")],
-        [("🖼 Логотип для КП", "a:ask:logo"), ("🧾 НДС 20% / без НДС", "a:vat")],
+        [("🖼 Логотип для КП", "a:ask:logo"), (f"🧾 НДС {tax.current_vat():g}% / без НДС", "a:vat")],
         [("🏢 Накладные в себестоимости вкл/выкл", "a:nr")],
     ]
     return "\n".join(lines), kb(rows)

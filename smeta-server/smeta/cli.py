@@ -19,6 +19,7 @@ from .materials import OfferBook
 from .model import Company, Estimate
 from .money import dec, rub
 from .profit import build_report
+from .tax import current_vat
 
 DEMO = """штукатурка стен 120 м2
 шпаклевка стен 120 м2
@@ -59,7 +60,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--customer", default="")
     parser.add_argument("--object", dest="object_name", default="")
     parser.add_argument("--index", default="", help="название индекса пересчёта из data/rates/indices.csv")
-    parser.add_argument("--vat", default="20", help="НДС, %% (0 для УСН)")
+    parser.add_argument("--vat", default=str(current_vat()), help="НДС, %% (0 для УСН); по умолчанию — ставка из data/tax/rates.csv")
     parser.add_argument("--cut", default="0", help="срезать смету на N %%")
     parser.add_argument("--fit", default="", help="подогнать итог под сумму")
     parser.add_argument("--no-nr-in-cost", action="store_true", help="не включать накладные в себестоимость")

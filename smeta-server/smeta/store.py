@@ -16,7 +16,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     tg_id INTEGER PRIMARY KEY,
     company TEXT NOT NULL DEFAULT '{}',
-    vat_pct TEXT NOT NULL DEFAULT '20',
+    vat_pct TEXT NOT NULL DEFAULT '22',
     index_name TEXT NOT NULL DEFAULT '',
     floor_with_nr INTEGER NOT NULL DEFAULT 1,
     use_demo_rates INTEGER NOT NULL DEFAULT 1,
@@ -66,6 +66,10 @@ CREATE TABLE IF NOT EXISTS promo_used (
     created_at TEXT NOT NULL,
     PRIMARY KEY (tg_id, code)
 );
+CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+);
 """
 
 # Columns added after the first release: (table, column, ddl). Old databases get them on start.
@@ -107,6 +111,7 @@ class Store:
         self.conn.executescript(SCHEMA)
         self._migrate()
         self.conn.executescript(INDEXES)
+        self._data_migrations()
         self.conn.commit()
 
     def _migrate(self) -> None:
@@ -114,6 +119,17 @@ class Store:
             existing = {row["name"] for row in self.conn.execute(f"PRAGMA table_info({table})")}
             if column not in existing:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
+    def _data_migrations(self) -> None:
+        """Разовые правки данных — каждая под флагом в `meta`, чтобы отработать ровно один раз."""
+        done = {row["key"] for row in self.conn.execute("SELECT key FROM meta")}
+        if "vat_2026" not in done:
+            from . import tax
+            # НДС 20 % не действует с 01.01.2026 (ФЗ-425): всех, кто остался на старом
+            # значении по умолчанию, поднимаем до текущей ставки из data/tax/rates.csv.
+            # Нулевой НДС (УСН) и осознанно выставленные ставки не трогаем.
+            self.conn.execute("UPDATE users SET vat_pct = ? WHERE vat_pct = '20'", (str(tax.current_vat()),))
+            self.conn.execute("INSERT INTO meta (key, value) VALUES ('vat_2026', ?)", (_now(),))
 
     def close(self) -> None:
         self.conn.close()
@@ -123,7 +139,9 @@ class Store:
     def user(self, tg_id: int) -> sqlite3.Row:
         row = self.conn.execute("SELECT * FROM users WHERE tg_id = ?", (tg_id,)).fetchone()
         if row is None:
-            self.conn.execute("INSERT INTO users (tg_id, created_at) VALUES (?, ?)", (tg_id, _now()))
+            from . import tax
+            self.conn.execute("INSERT INTO users (tg_id, vat_pct, created_at) VALUES (?, ?, ?)",
+                              (tg_id, str(tax.current_vat()), _now()))
             self.conn.commit()
             row = self.conn.execute("SELECT * FROM users WHERE tg_id = ?", (tg_id,)).fetchone()
         return row

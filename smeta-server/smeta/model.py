@@ -353,7 +353,7 @@ class Estimate:
     company: Company = field(default_factory=Company)
     positions: list[Position] = field(default_factory=list)
     indices: Indices = field(default_factory=Indices)
-    vat_pct: Decimal = Decimal(20)
+    vat_pct: Decimal = Decimal(22)  # основная ставка НДС; живое значение — в data/tax/rates.csv
     history: list[str] = field(default_factory=list)
     basis: str = ""   # «ФЕР / ФСНБ-2022» или «договорные цены»
     # Накладные расходы считать частью себестоимости (ООО с офисом) или нет (бригада).

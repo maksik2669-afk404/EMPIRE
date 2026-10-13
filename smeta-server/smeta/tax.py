@@ -116,10 +116,11 @@ class Money:
 
     @property
     def input_vat(self) -> Decimal:
-        """Входной НДС в закупке материалов (20/120), если поставщики с НДС."""
+        """Входной НДС в закупке материалов (ставка/(100+ставка)), если поставщики с НДС."""
         if not self.suppliers_with_vat or not self.materials:
             return ZERO
-        return money(self.materials * Decimal(20) / Decimal(120))
+        rate = current_vat()                      # действующая ставка из data/tax/rates.csv
+        return money(self.materials * rate / (Decimal(100) + rate))
 
     @property
     def costs_net(self) -> Decimal:
@@ -235,7 +236,7 @@ def usn_vat(inputs: Money, rates: TaxRates) -> tuple[Decimal, list[str]]:
     amount = money(inputs.revenue_net * pct(rate))
     return amount, [
         f"доход за год выше {rub(threshold)} ₽ — на УСН начисляется НДС {rate:g}% без права на вычеты "
-        "(альтернатива — 20 % с вычетами, тогда считайте как ОСНО)"
+        f"(альтернатива — {rates.num('vat_rate'):g} % с вычетами, тогда считайте как ОСНО)"
     ]
 
 
@@ -311,7 +312,7 @@ def calculate(regime: str, inputs: Money, rates: TaxRates | None = None) -> TaxR
         if inputs.input_vat:
             result.notes.append(f"из НДС вычтен входной НДС поставщиков {rub(inputs.input_vat)} ₽")
     else:
-        result.notes.append("в смете нет НДС, а на ОСНО его нужно начислить — поднимите цену на 20 % или смените режим")
+        result.notes.append(f"в смете нет НДС, а на ОСНО его нужно начислить — поднимите цену на {rates.num('vat_rate'):g} % или смените режим")
     contributions, notes = insurance_contributions(inputs, rates)
     if contributions:
         result.items["Страховые взносы с ФОТ"] = contributions
@@ -360,13 +361,13 @@ def compare_text(inputs: Money, rates: TaxRates | None = None) -> str:
     return "\n".join(lines)
 
 
-def price_for(target_net, regime: str, *, materials=ZERO, payroll=ZERO, other_costs=ZERO, vat_pct=Decimal(20),
+def price_for(target_net, regime: str, *, materials=ZERO, payroll=ZERO, other_costs=ZERO, vat_pct=None,
               employees: bool = True, ip: bool = False, annual_revenue=None, suppliers_with_vat: bool = True,
               rates: TaxRates | None = None) -> tuple[Decimal, TaxResult, Money]:
     """Smallest estimate total that leaves `target_net` after costs and taxes (to the kopeck)."""
     rates = rates or TaxRates.load()
     target = money(target_net)
-    vat_rate = dec(vat_pct)
+    vat_rate = rates.num("vat_rate") if vat_pct is None else dec(vat_pct)
 
     def run(revenue: Decimal) -> tuple[Decimal, TaxResult, Money]:
         vat = money(revenue * vat_rate / (100 + vat_rate)) if vat_rate else ZERO
@@ -397,3 +398,8 @@ def price_for(target_net, regime: str, *, materials=ZERO, payroll=ZERO, other_co
             low = middle
     net, result, inputs = run(high)
     return high, result, inputs
+
+
+def current_vat(year: int | None = None) -> Decimal:
+    """Текущая основная ставка НДС (%) из справочника data/tax/rates.csv."""
+    return TaxRates.load(year).num("vat_rate")

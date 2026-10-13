@@ -717,7 +717,7 @@ async def do_action(call: CallbackQuery, deps: Deps, state: FSMContext, bot: Bot
         await call.message.answer(f"<pre>{escape(tax.TaxRates.load().as_text())}</pre>")
         return None, None
     if name == "vat":
-        set_vat(deps, tg_id, ZERO if deps.store.settings(tg_id)["vat_pct"] else Decimal(20))
+        set_vat(deps, tg_id, ZERO if deps.store.settings(tg_id)["vat_pct"] else tax.current_vat())
         return None, None
     if name == "nr":
         set_nr(deps, tg_id, not deps.store.settings(tg_id)["floor_with_nr"])

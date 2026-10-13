@@ -12,12 +12,12 @@ from pathlib import Path
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 
-from . import datafiles
+from . import datafiles, tax
 from .catalog import Catalog, Indices, tokens
 from .headers import classify, normalize_header
 from .importer import read_any
 from .model import Position
-from .money import ZERO, dec, money, rub
+from .money import ONE, ZERO, dec, money, pct, rub
 from .units import norm_unit, parse_unit
 
 OVER = Decimal("0.25")       # дороже справочника более чем на 25 % — замечание
@@ -221,9 +221,12 @@ def _check_totals(report: AuditReport) -> None:
     if vat is not None:
         report.vat_known = True
         base = declared if declared is not None else computed
-        expected = money(base * Decimal("0.2"))
-        if abs(vat - expected) > Decimal(1) and abs(vat - money(base * Decimal("0.2") / Decimal("1.2"))) > Decimal(1):
-            report.totals_issues.append(f"НДС {rub(vat)} ₽ не равен 20 % от итога ({rub(expected)} ₽)")
+        rate = tax.current_vat()                 # действующая ставка НДС из data/tax/rates.csv
+        multiplier = pct(rate)
+        expected = money(base * multiplier)       # НДС сверху итога
+        inside = money(base * multiplier / (ONE + multiplier))  # или НДС «в том числе»
+        if abs(vat - expected) > Decimal(1) and abs(vat - inside) > Decimal(1):
+            report.totals_issues.append(f"НДС {rub(vat)} ₽ не равен {rate:g} % от итога ({rub(expected)} ₽)")
 
 
 def _missing_works(rows: list[AuditRow]) -> list[str]:
