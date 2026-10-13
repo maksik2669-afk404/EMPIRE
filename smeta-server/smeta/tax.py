@@ -71,7 +71,7 @@ class TaxRates:
                     rows.append((int(row[0]), row[1].strip(), row[2].strip(), row[3].strip() if len(row) > 3 else ""))
         years = sorted({row[0] for row in rows})
         if not years:
-            raise ValueError(f"нет файла со ставками налогов: {source}")
+            raise ValueError("справочник налоговых ставок недоступен — сообщите в поддержку")
         chosen = max((y for y in years if y <= wanted), default=min(years))
         values = {key: value for y, key, value, _ in rows if y == chosen}
         notes = {key: note for y, key, _, note in rows if y == chosen}
@@ -82,7 +82,7 @@ class TaxRates:
         for key, value in self.values.items():
             note = self.notes.get(key, key)
             lines.append(f"  {note}: {value}")
-        lines.append("Правятся в data/tax/rates.csv — ставки меняются, код не меняется.")
+        lines.append("Справочные ставки для расчётов — перед сдачей отчётности сверьтесь с НК РФ.")
         return "\n".join(lines)
 
 

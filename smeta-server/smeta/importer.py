@@ -71,7 +71,12 @@ class ImportReport:
             place = f"{self.fmt}" + (f", лист «{self.sheet}»" if self.sheet else "")
             lines.append(f"Файл: {self.source or '—'} ({place}, заголовок в строке {self.header_row})")
         if self.columns:
-            lines.append("Распознаны столбцы: " + ", ".join(f"{k} ← «{v}»" for k, v in self.columns.items()))
+            labels = {"code": "Шифр", "name": "Наименование", "unit": "Ед. изм.",
+                      "ot": "Оплата труда", "em": "Эксплуатация машин", "mat": "Материалы",
+                      "zpm": "ЗП машинистов", "tz": "Трудозатраты", "work_type": "Вид работ",
+                      "region": "Субъект РФ", "period": "Период", "group": "Группа", "smr": "Индекс СМР"}
+            lines.append("Распознаны столбцы: "
+                         + ", ".join(f"{labels.get(k, k)} («{v}»)" for k, v in self.columns.items()))
         for reason, count in self.skipped.most_common():
             lines.append(f"Пропущено {count}: {reason}")
         for warning in self.warnings:
@@ -181,7 +186,7 @@ def read_xml(data: bytes, source: str = "") -> list[Table]:
     try:
         root = ElementTree.fromstring(data)
     except ElementTree.ParseError as error:
-        raise ValueError(f"не удалось разобрать XML: {error}") from error
+        raise ValueError("не удалось разобрать XML-файл — проверьте, что это выгрузка сметы") from error
 
     candidates: dict[str, list[dict[str, str]]] = {}
     for element in root.iter():
@@ -373,7 +378,7 @@ def rates_from_table(table: Table, *, source: str = "") -> tuple[list[Rate], Imp
     if out and not any(rate.work_type != "прочие" for rate in out):
         report.warnings.append(
             "вид работ не определён ни у одной расценки — НР и СП будут нулевыми, "
-            "задайте столбец «Вид работ» или дополните data/rates/sbornik_work_type.csv"
+            "добавьте в файл столбец «Вид работ»"
         )
     if out and not any(rate.tz for rate in out):
         report.warnings.append("нет затрат труда (чел.-ч) — в смете не будет справки о трудозатратах")

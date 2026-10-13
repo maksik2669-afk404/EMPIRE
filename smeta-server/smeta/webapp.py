@@ -111,12 +111,12 @@ def user_from_init_data(token: str, init_data: str, now: float | None = None) ->
     try:
         parsed = safe_parse_webapp_init_data(token, init_data)
     except ValueError as error:
-        raise ApiError("подпись Телеграма не сходится", 401) from error
+        raise ApiError("не удалось подтвердить вход — откройте приложение заново из Телеграма", 401) from error
     stamp = parsed.auth_date.timestamp() if hasattr(parsed.auth_date, "timestamp") else float(parsed.auth_date)
     if MAX_AGE and (now or time.time()) - stamp > MAX_AGE:
         raise ApiError("сессия устарела — закройте и откройте приложение заново", 401)
     if not parsed.user:
-        raise ApiError("нет пользователя в данных Телеграма", 401)
+        raise ApiError("откройте приложение заново из Телеграма", 401)
     return int(parsed.user.id)
 
 
@@ -468,9 +468,9 @@ def _wrap(handler):
                 try:
                     body = await request.json()
                 except (json.JSONDecodeError, UnicodeDecodeError):
-                    raise ApiError("тело запроса — не JSON")
+                    raise ApiError("не удалось обработать запрос — обновите приложение")
                 if not isinstance(body, dict):
-                    raise ApiError("тело запроса — не объект")
+                    raise ApiError("неверный запрос — обновите приложение")
             request.app[DEPS_KEY].store.user(tg_id)
             return web.json_response(await handler(request, request.app[DEPS_KEY], tg_id, body))
         except ApiError as error:

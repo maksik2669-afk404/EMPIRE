@@ -267,7 +267,8 @@ def materials_screen(ctx: Ctx) -> tuple[str, Markup]:
     preview = consumption.calculate(estimate, ctx.offers())
     lines = ["🧱 <b>Материалы по нормам расхода</b>"]
     if not preview:
-        lines.append("Для работ этой сметы нет норм расхода. Нормы — в файле data/materials/norms.csv.")
+        lines.append("Для работ этой сметы пока нет норм расхода материалов. "
+                     "Добавьте материалы вручную — строкой «мат: керамогранит 20 м2 1550».")
         return "\n".join(lines), kb([])
     total = ZERO
     for position in preview:
