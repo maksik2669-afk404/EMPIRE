@@ -15,6 +15,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import time
 from decimal import Decimal
 from pathlib import Path
@@ -521,7 +522,19 @@ def _tribute_extract(payload: dict) -> dict:
         return None
 
     tg = pick("telegram_user_id", "telegramUserId", "telegram_id", "telegramId",
-              "user_telegram_id", "tg_id", "userId", "user_id")
+              "user_telegram_id", "tg_id", "userId", "user_id", "chat_id")
+    if tg is None:
+        # запасной путь: Telegram id, который мы зашили в ссылку через {tg}, мог вернуться
+        # в произвольном passthrough-поле. Берём только из таких полей (не из суммы/номера заказа)
+        # и предпочитаем явный маркер ref_<id>, чтобы не спутать с телефоном или иным числом.
+        passthrough = " ".join(
+            str(data.get(k) or payload.get(k) or "")
+            for k in ("payload", "custom", "custom_data", "metadata", "tracker", "tracking",
+                      "ref", "client_reference_id", "external_id", "start_param", "startapp",
+                      "comment", "message", "label"))
+        match = re.search(r"ref_(\d{5,15})", passthrough) or re.search(r"\b(\d{6,15})\b", passthrough)
+        if match:
+            tg = match.group(1)
     status = str(payload.get("name") or payload.get("event") or payload.get("type")
                  or pick("status", "state") or "").lower()
     return {

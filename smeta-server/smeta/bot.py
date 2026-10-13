@@ -146,6 +146,25 @@ async def cmd_invite(message: Message, deps: Deps, state: FSMContext) -> None:
     await show(message, deps, state, "ref")
 
 
+@router.message(Command("tribute"))
+async def cmd_tribute(message: Message, deps: Deps) -> None:
+    if message.from_user.id not in billing.admins():
+        return
+    url = os.getenv("SMETA_TRIBUTE_URL", "").strip()
+    webapp_url = os.getenv("SMETA_WEBAPP_URL", "").strip().rstrip("/")
+    lines = [
+        "🔗 <b>Tribute — диагностика</b> (видно только админу)",
+        f"Ссылка оплаты: {'задана' if url else '❌ не задана'}",
+        f"Секрет вебхука: {'задан' if billing.tribute_secret() else '❌ не задан (вебхук выключен)'}",
+        f"Дней за оплату по умолчанию: {billing.tribute_days('', 0)}",
+        (f"Адрес вебхука для Tribute: <code>{webapp_url}/tribute/webhook</code>"
+         if webapp_url else "❌ Мини-апп выключен (нет SMETA_WEBAPP_URL) — вебхук недоступен"),
+    ]
+    if url and "t.me/tribute" not in url and "tribute.tg" not in url:
+        lines.append("⚠️ Ссылка не похожа на Tribute — ожидается домен t.me/tribute или tribute.tg.")
+    await message.answer("\n".join(lines))
+
+
 @router.message(Command("help"))
 async def cmd_help(message: Message, deps: Deps, state: FSMContext) -> None:
     await show(message, deps, state, "help")
