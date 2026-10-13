@@ -62,6 +62,28 @@ def free_exports() -> bool:
     return os.getenv("SMETA_FREE_EXPORTS", "0").strip() in {"1", "on", "true", "да"}
 
 
+def _int_env(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+def ref_days() -> int:
+    """Дни Pro пригласившему — начисляются, когда приглашённый создаёт первую смету."""
+    return _int_env("SMETA_REF_DAYS", 14)
+
+
+def ref_welcome_days() -> int:
+    """Дни Pro новому пользователю, пришедшему по реферальной ссылке."""
+    return _int_env("SMETA_REF_WELCOME", 7)
+
+
+def ref_cap_days() -> int:
+    """Потолок суммарных дней Pro, которые один пользователь может заработать рефералами."""
+    return _int_env("SMETA_REF_CAP_DAYS", 180)
+
+
 def admins() -> set[int]:
     raw = os.getenv("SMETA_ADMIN_IDS") or os.getenv("ADMIN_IDS") or ""
     return {int(part) for part in raw.replace(" ", "").split(",") if part.strip().lstrip("-").isdigit()}

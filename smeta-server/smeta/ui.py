@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from html import escape
 from typing import Callable
+from urllib.parse import quote
 
 from aiogram.types import (
     InlineKeyboardButton as Button,
@@ -105,6 +106,7 @@ def home(ctx: Ctx) -> tuple[str, Markup]:
         [("🔍 Проверить чужую смету", "go:aud"), ("🧾 Налоги", "go:tax")],
         [("📊 Воронка продаж", "go:stats"), ("🏢 Компания", "go:co")],
         [("📚 Справочники", "go:refs"), ("💳 Подписка", "go:sub")],
+        [("🎁 Пригласить друга — дни Pro в подарок", "go:ref")],
         [("❓ Помощь", "go:help")],
     ]
     return "\n".join(lines), kb(rows, nav=False)
@@ -664,6 +666,29 @@ def subscription_screen(ctx: Ctx) -> tuple[str, Markup]:
     return "\n".join(lines), kb(rows)
 
 
+def invite_screen(ctx: Ctx) -> tuple[str, Markup]:
+    username = ctx.deps.bot_username
+    stats = ctx.deps.store.ref_stats(ctx.tg_id)
+    welcome, reward = billing.ref_welcome_days(), billing.ref_days()
+    lines = [
+        "🎁 <b>Пригласить друга</b>", "",
+        f"Пришлите коллеге свою ссылку. Он получит <b>{welcome} дней Pro</b> сразу, "
+        f"а вы — <b>{reward} дней Pro</b>, когда он создаст первую смету.",
+        f"\nПриглашено активных: <b>{stats['ref_count']}</b>",
+    ]
+    buttons: list[list[Button]] = []
+    if username:
+        link = f"https://t.me/{username}?start=ref_{ctx.tg_id}"
+        lines += ["\nВаша ссылка (нажмите, чтобы скопировать):", f"<code>{link}</code>"]
+        invite_text = f"Считаю сметы в этом боте — держи, тебе {welcome} дней Pro в подарок:"
+        share = "https://t.me/share/url?url=" + quote(link, safe="") + "&text=" + quote(invite_text, safe="")
+        buttons.append([Button(text="📤 Поделиться ссылкой", url=share)])
+    else:
+        lines.append("\n⚠️ Ссылка появится после перезапуска бота.")
+    buttons.append([Button(text="⬅️ Назад", callback_data="bk"), Button(text="🏠 Меню", callback_data="hm")])
+    return "\n".join(lines), Markup(inline_keyboard=buttons)
+
+
 def estimates_list(ctx: Ctx, page: int = 0) -> tuple[str, Markup]:
     rows_db = ctx.deps.store.list_estimates(ctx.tg_id, limit=PAGE, offset=page * PAGE)
     total = ctx.deps.store.count_estimates(ctx.tg_id)
@@ -709,6 +734,7 @@ SCREENS: dict[str, Callable] = {
     "obmw": obmer_works_screen, "tpl": templates_screen, "tpl1": template_screen, "tplp": template_preview,
     "aud": audit_screen, "tax": tax_screen, "co": company_screen, "refs": refs_screen, "idx": index_screen,
     "sub": subscription_screen, "list": estimates_list, "stats": stats_screen, "help": help_screen,
+    "ref": invite_screen,
 }
 INT_ARG = {"items", "pos", "pcoef", "pick", "vd", "idx", "list"}
 

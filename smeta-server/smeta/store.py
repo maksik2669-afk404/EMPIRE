@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from dataclasses import asdict
 from datetime import date, datetime, timedelta, timezone
@@ -70,6 +71,12 @@ CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS ref_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    referrer_id INTEGER NOT NULL,
+    days INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 # Columns added after the first release: (table, column, ddl). Old databases get them on start.
@@ -86,6 +93,9 @@ MIGRATIONS = (
     ("estimates", "total", "TEXT NOT NULL DEFAULT '0'"),
     ("estimates", "sent_at", "TEXT NOT NULL DEFAULT ''"),
     ("estimates", "remind_at", "TEXT NOT NULL DEFAULT ''"),
+    ("users", "referred_by", "TEXT NOT NULL DEFAULT ''"),
+    ("users", "ref_rewarded", "INTEGER NOT NULL DEFAULT 0"),
+    ("users", "ref_count", "INTEGER NOT NULL DEFAULT 0"),
 )
 INDEXES = """
 CREATE INDEX IF NOT EXISTS idx_estimates_user ON estimates(tg_id, updated_at DESC);
@@ -199,6 +209,66 @@ class Store:
     def all_users(self) -> list[int]:
         return [row["tg_id"] for row in self.conn.execute("SELECT tg_id FROM users")]
 
+    # ---------- referrals ----------
+
+    def register_referral(self, new_id: int, referrer_id: int, welcome_days: int) -> dict | None:
+        """Новый пользователь пришёл по ссылке: фиксируем пригласившего и даём новичку бонусные дни.
+
+        Срабатывает только для НОВОГО пользователя (строки ещё нет), не для себя и только если
+        пригласивший реально существует. Пригласившего наградим позже — на его первой смете.
+        """
+        if not referrer_id or referrer_id == new_id:
+            return None
+        if self.conn.execute("SELECT 1 FROM users WHERE tg_id = ?", (new_id,)).fetchone():
+            return None                                   # не новый — ссылку игнорируем
+        if not self.conn.execute("SELECT 1 FROM users WHERE tg_id = ?", (referrer_id,)).fetchone():
+            return None                                   # пригласившего нет в базе
+        from . import tax
+        self.conn.execute(
+            "INSERT INTO users (tg_id, vat_pct, referred_by, created_at) VALUES (?, ?, ?, ?)",
+            (new_id, str(tax.current_vat()), str(referrer_id), _now()))
+        self.conn.commit()
+        until = self.extend_subscription(new_id, welcome_days) if welcome_days > 0 else None
+        return {"referrer_id": referrer_id, "welcome_days": welcome_days, "until": until}
+
+    def _reward_referrer(self, new_id: int) -> None:
+        """На первой смете приглашённого начисляем пригласившему дни Pro (до потолка) и ставим в очередь уведомление."""
+        row = self.conn.execute("SELECT referred_by, ref_rewarded FROM users WHERE tg_id = ?", (new_id,)).fetchone()
+        if not row or not row["referred_by"] or row["ref_rewarded"]:
+            return
+        self.conn.execute("UPDATE users SET ref_rewarded = 1 WHERE tg_id = ?", (new_id,))   # один раз, что бы ни было дальше
+        referrer = str(row["referred_by"])
+        referrer_id = int(referrer) if referrer.lstrip("-").isdigit() else 0
+        ref_row = (self.conn.execute("SELECT ref_count FROM users WHERE tg_id = ?", (referrer_id,)).fetchone()
+                   if referrer_id else None)
+        if ref_row is None:
+            self.conn.commit()
+            return
+        try:
+            days = int(os.getenv("SMETA_REF_DAYS", "14"))
+            cap = int(os.getenv("SMETA_REF_CAP_DAYS", "180"))
+        except ValueError:
+            days, cap = 14, 180
+        earned = int(ref_row["ref_count"]) * days
+        self.conn.execute("UPDATE users SET ref_count = ref_count + 1 WHERE tg_id = ?", (referrer_id,))
+        if days > 0 and earned < cap:
+            self.extend_subscription(referrer_id, days)
+            self.conn.execute("INSERT INTO ref_queue (referrer_id, days, created_at) VALUES (?, ?, ?)",
+                              (referrer_id, days, _now()))
+        self.conn.commit()
+
+    def ref_stats(self, tg_id: int) -> dict:
+        row = self.user(tg_id)
+        return {"ref_count": int(row["ref_count"]), "referred_by": row["referred_by"]}
+
+    def pop_ref_rewards(self, limit: int = 50) -> list[sqlite3.Row]:
+        """Забрать и удалить накопившиеся уведомления о реферальных наградах (для цикла напоминаний)."""
+        rows = self.conn.execute("SELECT id, referrer_id, days FROM ref_queue ORDER BY id LIMIT ?", (limit,)).fetchall()
+        if rows:
+            self.conn.executemany("DELETE FROM ref_queue WHERE id = ?", [(row["id"],) for row in rows])
+            self.conn.commit()
+        return rows
+
     # ---------- estimates ----------
 
     def save_estimate(self, tg_id: int, estimate: Estimate, estimate_id: int | None = None) -> int:
@@ -221,6 +291,7 @@ class Store:
         self.user(tg_id)
         self.conn.execute("UPDATE users SET estimates_created = estimates_created + 1 WHERE tg_id = ?", (tg_id,))
         self.conn.commit()
+        self._reward_referrer(tg_id)
         return int(cursor.lastrowid)
 
     def load_estimate(self, tg_id: int, estimate_id: int) -> Estimate | None:

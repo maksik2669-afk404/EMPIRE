@@ -120,11 +120,27 @@ async def back(target: Message | CallbackQuery, deps: Deps, state: FSMContext) -
 
 @router.message(CommandStart())
 @router.message(Command("menu"))
-async def cmd_start(message: Message, deps: Deps, state: FSMContext) -> None:
+async def cmd_start(message: Message, deps: Deps, state: FSMContext, command: CommandObject, bot: Bot) -> None:
+    ref_result = None
+    payload = (command.args or "").strip()
+    if payload.startswith("ref_"):
+        raw = payload[4:]
+        referrer_id = int(raw) if raw.lstrip("-").isdigit() else 0
+        ref_result = deps.store.register_referral(message.from_user.id, referrer_id, billing.ref_welcome_days())
     deps.store.user(message.from_user.id)
     await state.set_state(None)
     await message.answer("👋 Сметчик на связи. Кнопка «🏠 Меню» внизу работает всегда.", reply_markup=ui.reply_keyboard())
+    if ref_result:
+        await message.answer(
+            f"🎁 Вы пришли по приглашению — вам <b>+{ref_result['welcome_days']} дней Pro</b>, все документы открыты. "
+            "Создайте первую смету — и пригласивший тоже получит бонус.")
     await show(message, deps, state, "home")
+
+
+@router.message(Command("invite"))
+async def cmd_invite(message: Message, deps: Deps, state: FSMContext) -> None:
+    deps.store.user(message.from_user.id)
+    await show(message, deps, state, "ref")
 
 
 @router.message(Command("help"))
@@ -1283,6 +1299,16 @@ async def run_reminders(bot: Bot, deps: Deps, now: datetime | None = None) -> in
         except (TelegramForbiddenError, TelegramBadRequest):
             pass
         deps.store.update_settings(row["tg_id"], sub_reminded=row["paid_until"])
+    for row in deps.store.pop_ref_rewards():
+        try:
+            await bot.send_message(
+                row["referrer_id"],
+                f"🎁 По вашей ссылке пришёл активный пользователь — вам <b>+{row['days']} дней Pro</b>! "
+                "Спасибо, что делитесь.",
+                reply_markup=Markup(inline_keyboard=[[Button(text="🎁 Пригласить ещё", callback_data="go:ref")]]))
+            sent += 1
+        except (TelegramForbiddenError, TelegramBadRequest):
+            pass
     return sent
 
 
@@ -1313,7 +1339,8 @@ COMMANDS = [
     ("menu", "🏠 Главное меню"), ("new", "🧮 Новая смета"), ("smeta", "📋 Текущая смета"),
     ("list", "📂 Мои сметы"), ("obmer", "📐 Обмер"), ("templates", "🏗 Смета по шаблону"),
     ("audit", "🔍 Проверить чужую смету"), ("nalog", "🧾 Налоги"), ("docs", "📄 Документы"),
-    ("company", "🏢 Реквизиты компании"), ("sub", "💳 Подписка"), ("help", "❓ Помощь"),
+    ("company", "🏢 Реквизиты компании"), ("sub", "💳 Подписка"),
+    ("invite", "🎁 Пригласить друга"), ("help", "❓ Помощь"),
 ]
 
 
@@ -1333,6 +1360,10 @@ async def run() -> None:
     dispatcher = Dispatcher(storage=MemoryStorage())
     dispatcher.include_router(router)
     await bot.set_my_commands([BotCommand(command=c, description=d) for c, d in COMMANDS])
+    try:
+        deps.bot_username = (await bot.get_me()).username or ""
+    except Exception:                                    # noqa: BLE001 — ссылки просто будут недоступны
+        log.warning("не удалось получить имя бота для реферальных ссылок")
     runner = await webapp.start(deps, bot, token)
     url = webapp.webapp_url()
     if url:

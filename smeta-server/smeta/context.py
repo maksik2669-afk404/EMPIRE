@@ -22,6 +22,7 @@ class Deps:
     offers: OfferBook
     export_dir: Path
     logo_dir: Path = field(default_factory=lambda: DATA / "logos")
+    bot_username: str = ""                    # для реферальных ссылок t.me/<bot>?start=ref_<id>
 
 
 @dataclass
