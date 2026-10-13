@@ -689,6 +689,8 @@ def subscription_screen(ctx: Ctx) -> tuple[str, Markup]:
         rows.append([(f"{item.title} — {price}", f"a:buy:{item.code}")])
     lines.append("Подписка открывает готовые документы: смета, КП, наряд, КС-2/КС-3. "
                  "Расчёт на экране — всегда бесплатно.")
+    if billing.tribute_pay_url(ctx.tg_id):
+        rows.append([("💳 Оплатить по СБП (Tribute)", "a:tribute")])
     rows.append([("🎟 Ввести промокод", "a:ask:promo")])
     if ctx.tg_id in billing.admins():
         stats = ctx.deps.store.billing_stats()

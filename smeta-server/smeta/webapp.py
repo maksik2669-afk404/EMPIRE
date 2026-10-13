@@ -9,6 +9,9 @@ and gets a certificate automatically (a domain, or <IP>.sslip.io without buying 
 """
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -18,6 +21,7 @@ from pathlib import Path
 
 from aiohttp import web
 from aiogram import Bot
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import FSInputFile
 from aiogram.utils.web_app import safe_parse_webapp_init_data
 
@@ -477,6 +481,98 @@ def _wrap(handler):
     return endpoint
 
 
+# ---------------------------------------------------------------- Tribute (СБП) webhook
+#
+# Платёж проходит ВНУТРИ Tribute (он — merchant of record: сам выбивает чек по 54-ФЗ и
+# платит нам). Мы лишь принимаем подписанный вебхук об успешной оплате и начисляем дни.
+# Точные имена полей и схема подписи Tribute здесь заданы «с запасом» и логируются целиком
+# при первом реальном вебхуке — по нему _tribute_extract/_tribute_signature_ok и фиксируются.
+
+TRIBUTE_SIG_HEADERS = ("trbt-signature", "X-Tribute-Signature", "tribute-signature", "X-Signature")
+TRIBUTE_PAID = {"", "paid", "success", "successful", "completed", "payment", "order.paid",
+                "order_paid", "new_donation", "new_subscription", "subscription"}
+
+
+def _tribute_signature_ok(raw: bytes, signature: str) -> bool:
+    secret = billing.tribute_secret()
+    if not secret or not signature:
+        return False
+    mac = hmac.new(secret.encode(), raw, hashlib.sha256)
+    candidates = {mac.hexdigest(), base64.b64encode(mac.digest()).decode()}
+    sig = signature.strip()
+    if "=" in sig and sig.split("=", 1)[0].lower() in {"sha256", "hmac-sha256"}:
+        sig = sig.split("=", 1)[1]
+    return any(hmac.compare_digest(sig, c) or hmac.compare_digest(sig.lower(), c.lower())
+               for c in candidates)
+
+
+def _tribute_extract(payload: dict) -> dict:
+    """Достаём из полезной нагрузки то, что нам нужно, пробуя разные имена полей."""
+    data = payload.get("payload") or payload.get("data") or payload
+    data = data if isinstance(data, dict) else {}
+
+    def pick(*keys):
+        for k in keys:
+            value = data.get(k)
+            if value in (None, ""):
+                value = payload.get(k)
+            if value not in (None, ""):
+                return value
+        return None
+
+    tg = pick("telegram_user_id", "telegramUserId", "telegram_id", "telegramId",
+              "user_telegram_id", "tg_id", "userId", "user_id")
+    status = str(payload.get("name") or payload.get("event") or payload.get("type")
+                 or pick("status", "state") or "").lower()
+    return {
+        "status": status,
+        "charge_id": str(pick("order_id", "orderId", "uuid", "transaction_id", "payment_id", "id") or ""),
+        "tg_id": int(tg) if tg is not None and str(tg).lstrip("-").isdigit() else 0,
+        "product": str(pick("product_id", "productId", "product", "subscription_name", "name", "item") or ""),
+        "amount": dec(pick("amount", "price", "sum", "total") or 0),
+        "currency": str(pick("currency", "cur") or "RUB"),
+    }
+
+
+async def tribute_webhook(request: web.Request) -> web.Response:
+    if not billing.tribute_enabled():
+        return web.json_response({"error": "tribute disabled"}, status=503)
+    raw = await request.read()
+    signature = next((request.headers.get(h) for h in TRIBUTE_SIG_HEADERS if request.headers.get(h)), "")
+    if not _tribute_signature_ok(raw, signature):
+        log.warning("tribute webhook: подпись не сошлась")
+        return web.json_response({"error": "bad signature"}, status=401)
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return web.json_response({"error": "bad json"}, status=400)
+    if not isinstance(payload, dict):
+        return web.json_response({"error": "bad json"}, status=400)
+    log.info("tribute webhook payload: %s", raw.decode("utf-8", "replace")[:2000])
+    fields = _tribute_extract(payload)
+    if fields["status"] and fields["status"] not in TRIBUTE_PAID:
+        return web.json_response({"ok": True, "ignored": fields["status"]})
+    tg_id, charge_id = fields["tg_id"], fields["charge_id"]
+    if not tg_id or not charge_id:
+        log.error("tribute webhook: не нашёл tg_id/charge_id — поправьте _tribute_extract под реальный payload")
+        return web.json_response({"error": "no user or charge id"}, status=422)
+    deps: Deps = request.app[DEPS_KEY]
+    bot: Bot = request.app[BOT_KEY]
+    if deps.store.charge_seen(charge_id):
+        return web.json_response({"ok": True, "duplicate": True})
+    days = billing.tribute_days(fields["product"], fields["amount"])
+    deps.store.user(tg_id)
+    until = deps.store.extend_subscription(tg_id, days)
+    deps.store.add_billing(tg_id, f"tribute:{fields['product'] or 'onetime'}",
+                           str(fields["amount"]), fields["currency"], charge_id)
+    try:
+        await bot.send_message(tg_id, f"✅ Оплата получена. Подписка активна до {until:%d.%m.%Y}. Спасибо!")
+    except (TelegramForbiddenError, TelegramBadRequest):
+        pass
+    log.info("tribute: +%s дн. пользователю %s до %s", days, tg_id, until)
+    return web.json_response({"ok": True})
+
+
 async def index(request: web.Request) -> web.Response:
     return web.FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
 
@@ -490,6 +586,7 @@ def create_app(deps: Deps, bot: Bot, token: str) -> web.Application:
     app[DEPS_KEY], app[BOT_KEY], app[TOKEN_KEY] = deps, bot, token
     app.router.add_get("/", index)
     app.router.add_get("/health", health)
+    app.router.add_post("/tribute/webhook", tribute_webhook)   # приём оплат Tribute (без initData)
     for method, path, handler in ROUTES:
         app.router.add_route(method, path, _wrap(handler))
     return app

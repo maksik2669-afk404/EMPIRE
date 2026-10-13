@@ -726,6 +726,14 @@ async def do_action(call: CallbackQuery, deps: Deps, state: FSMContext, bot: Bot
             return "⚠️ Тариф не найден", None
         await bot.send_invoice(chat_id=tg_id, **billing.invoice(item))
         return None, ""
+    if name == "tribute":
+        url = billing.tribute_pay_url(tg_id)
+        if not url:
+            return "⚠️ Оплата через Tribute не настроена.", None
+        await call.message.answer(
+            "💳 Оплата по СБП через Tribute.\nПосле оплаты подписка откроется автоматически.",
+            reply_markup=Markup(inline_keyboard=[[Button(text="Оплатить по СБП", url=url)]]))
+        return None, None
     if name == "tax_ip":
         deps.store.update_settings(tg_id, tax_ip=not deps.store.settings(tg_id)["tax_ip"])
         return None, None
